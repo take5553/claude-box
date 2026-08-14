@@ -1,0 +1,76 @@
+#!/usr/bin/env python3
+"""cmux notification bridge for claude-box (opt-in).
+
+claude-box exposes a generic "notification bridge" contract: point
+CLAUDE_BOX_NOTIFY_BRIDGE at an executable and claude-box runs it on the host,
+reads the TCP port it prints on the first stdout line, and forwards that port
+into the container (as CLAUDE_BOX_BRIDGE_PORT) plus a host.docker.internal
+mapping. In-box Claude Code hooks then POST their JSON to the bridge.
+
+This particular bridge relays those hooks to cmux's own notification entry point
+(`cmux hooks ...`), so a claude-box session launched inside a cmux pane surfaces
+its waiting/finished notifications to cmux. cmux is one editor among many, so it
+lives here in contrib/ rather than in the core launcher.
+
+Enable it by exporting, on the host:
+
+    export CLAUDE_BOX_NOTIFY_BRIDGE=/path/to/claude-box/contrib/cmux/notify-bridge
+
+When launched outside a cmux pane this script prints nothing and exits 0, which
+tells claude-box to run the container without any bridge.
+"""
+import http.server
+import os
+import stat
+import subprocess
+import sys
+
+# Decline unless we are actually inside a cmux pane. Printing nothing on stdout
+# is the contract's "no bridge available" signal.
+_surface = os.environ.get("CMUX_SURFACE_ID")
+_sock = os.environ.get("CMUX_SOCKET_PATH")
+if not _surface or not _sock:
+    sys.exit(0)
+try:
+    if not stat.S_ISSOCK(os.stat(_sock).st_mode):
+        sys.exit(0)
+except OSError:
+    sys.exit(0)
+
+CMUX = (os.environ.get("CMUX_CLAUDE_HOOK_CMUX_BIN")
+        or os.environ.get("CMUX_BUNDLED_CLI_PATH") or "cmux")
+ALLOWED = {"session-start", "prompt-submit", "notification", "stop", "session-end"}
+# Launching claude-box from inside a host-side claude session would misattribute
+# events, so drop CLAUDE* from the child env. CMUX_CLAUDE_PID is replaced with the
+# bridge's own pid (alive for the whole session) to pass cmux's stale-session check.
+ENV = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDE")}
+ENV["CMUX_CLAUDE_PID"] = str(os.getpid())
+
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        parts = [p for p in self.path.split("/") if p]
+        if parts == ["feed"]:
+            cmd = [CMUX, "hooks", "feed", "--source", "claude"]
+        elif len(parts) == 2 and parts[0] == "claude" and parts[1] in ALLOWED:
+            cmd = [CMUX, "hooks", "claude", parts[1]]
+        else:
+            self.send_response(404)
+            self.end_headers()
+            return
+        try:
+            n = min(int(self.headers.get("Content-Length") or 0), 1 << 20)
+            body = self.rfile.read(n)
+            subprocess.run(cmd, input=body, env=ENV, capture_output=True, timeout=15)
+        except Exception:
+            pass
+        self.send_response(204)
+        self.end_headers()
+
+    def log_message(self, *args):  # no access log
+        pass
+
+
+server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+print(server.server_address[1], flush=True)  # first stdout line: the chosen port
+server.serve_forever()

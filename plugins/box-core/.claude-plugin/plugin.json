@@ -1,0 +1,8 @@
+{
+  "name": "box-core",
+  "version": "0.1.0",
+  "description": "Built-in skills for claude-box. Provides env-request, which drops environment-change requests as files for the box maintainer to review.",
+  "author": {
+    "name": "claude-box"
+  }
+}

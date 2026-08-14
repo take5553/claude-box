@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# ---------------------------------------------------------------------------
+# claude-box-request — the in-box Claude writes an "environment change request" as
+# a Markdown file into the mounted request outbox, for a maintainer to review on
+# the host. No GitHub and no network: the request is a local file drop.
+#
+# The outbox is mounted only when the box was started with CLAUDE_BOX_REQUEST_DIR
+# (see docs/env-request-operations.md). If it is not mounted, filing is
+# unavailable. Whether the change is actually made is decided by the maintainer;
+# nothing here is applied automatically.
+#
+#   printf '%s' "$BODY" | claude-box-request --title "egress: allow example.com"
+# ---------------------------------------------------------------------------
+set -euo pipefail
+
+# The outbox path inside the container (claude-box mounts the host directory here
+# and sets this variable). No default: if it is not mounted, file nothing and exit
+# with an explicit error.
+OUTBOX="${CLAUDE_BOX_REQUEST_DIR:-}"
+if [ -z "$OUTBOX" ] || [ ! -d "$OUTBOX" ]; then
+  echo "claude-box-request: no request outbox is mounted." >&2
+  echo "  Start the box with CLAUDE_BOX_REQUEST_DIR=/path/to/outbox on the host." >&2
+  exit 4
+fi
+
+TITLE=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --title)    TITLE="${2:-}"; shift 2 ;;
+    --title=*)  TITLE="${1#--title=}"; shift ;;
+    -h|--help)
+      cat <<'USAGE'
+Usage: printf '%s' "<body (Markdown)>" | claude-box-request --title "<subject>"
+
+  Write an environment-change request as a Markdown file into the request outbox
+  (CLAUDE_BOX_REQUEST_DIR). The body is read from stdin. A maintainer reviews the
+  file on the host — nothing is applied automatically.
+USAGE
+      exit 0 ;;
+    *) echo "claude-box-request: unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+
+[ -n "$TITLE" ] || { echo "claude-box-request: --title is required" >&2; exit 2; }
+
+# Build a filesystem-safe slug from the title (non-alphanumerics become '-'). Falls
+# back to a fixed name; the timestamp keeps the filename unique regardless.
+slug="$(printf '%s' "$TITLE" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9' '-' | sed -E 's/-+/-/g; s/^-//; s/-$//')"
+[ -n "$slug" ] || slug="request"
+FILE="$OUTBOX/$(date -u '+%Y%m%dT%H%M%SZ')-${slug}.md"
+
+# Write the request: a title heading, the body from stdin, and a provenance footer
+# (a hint for the reviewer: who / from where).
+{
+  printf '# %s\n\n' "$TITLE"
+  cat
+  printf '\n\n---\n'
+  printf '%s\n' '<!-- provenance (added automatically by claude-box-request) -->'
+  printf '%s\n' '- Filed by: the in-box Claude (claude-box)'
+  printf '%s\n' "- Project: \`$PWD\`"
+  printf '%s\n' "- Host: \`$(hostname 2>/dev/null || echo '?')\`"
+  printf '%s\n' "- Time (UTC): $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+} > "$FILE"
+
+echo "Wrote environment request: $FILE"

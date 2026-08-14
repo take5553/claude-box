@@ -1,0 +1,24 @@
+# shellcheck shell=bash
+# Wrapper function so that typing `claude` launches it in YOLO mode
+# (--dangerously-skip-permissions). Management subcommands such as
+# login / update / mcp break or don't need that flag, so pass them through
+# untouched. Calls the real binary via `command` so it does not recurse.
+# The box's built-in plugins (env-request skill, etc.) are placed in
+# CLAUDE_BOX_PLUGIN_DIR by the entrypoint once it confirms compatibility, so
+# load them with --plugin-dir only on supported versions
+# (docs/env-request-operations.md).
+# When a notification bridge is present (CLAUDE_BOX_BRIDGE_PORT), add the hook
+# definitions (--settings additively merges into existing settings) to forward
+# waiting/completion events to the host-side bridge.
+claude() {
+  local box_plugin=() notify_settings=()
+  [ -n "${CLAUDE_BOX_PLUGIN_DIR:-}" ] && box_plugin=(--plugin-dir "$CLAUDE_BOX_PLUGIN_DIR")
+  [ -n "${CLAUDE_BOX_BRIDGE_PORT:-}" ] && notify_settings=(--settings /etc/claude-box/notify-hooks.json)
+  case "${1:-}" in
+    login|logout|update|mcp|config|doctor|setup-token|--version|-v|--help|-h)
+      command claude "$@" ;;
+    *)
+      command claude --dangerously-skip-permissions "${box_plugin[@]}" "${notify_settings[@]}" "$@" ;;
+  esac
+}
+

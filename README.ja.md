@@ -1,0 +1,238 @@
+# claude-box
+
+[English](README.md) · **日本語**
+
+隔離された、egress(外向き通信)を既定拒否したコンテナの中で
+[Claude Code](https://claude.com/claude-code) を **YOLO(`--dangerously-skip-permissions`)**
+で**安全に**動かすための箱。マウントするのは、今いるプロジェクトのディレクトリだけ。
+
+逐一の権限確認なしで自律的に作業させても、被害がホストと外部ネットワークへ波及しない
+よう、**ファイル分離**と**デフォルト拒否のネットワーク**の二重の壁で囲うのが狙い。
+
+## 何を守り、何を意図的に開けていないか
+
+**守るもの**
+
+- コンテナは**非 root**(`node`)・`--cap-drop=ALL` で起動し、firewall に必要な
+  capability だけを足す。
+- マウントは**対象プロジェクト 1 つだけ**(ホストと同じ絶対パス)。`$HOME` や `/`
+  からの起動は拒否する。
+- **egress は既定拒否・ホスト名で判定**。80/443 は透過リダイレクトでローカルプロキシへ
+  強制的に通し、TLS の SNI / HTTP の Host のホワイトリストだけを許可する。TLS は復号しない。
+- 認証・設定は専用ボリュームに永続化し、ホスト側とは分離する。
+
+**意図的に開けていないもの**(見落としではなく、これが要点)
+
+- **AWS API は開けない** — terraform は `validate` まで、`apply` は手元で。
+  この箱は IaC の検証まで、適用はしない。
+- **外へ出られるのは 80/443 だけ** — SSH(22)は通さない。git は HTTPS を使う。
+- **DinD もホスト docker socket も採用しない**。コンテナ内コンテナは rootless
+  Podman で、**既定 off**。
+- **TLS は検査しない**ので、箱が制御するのは「どのホストへ到達できるか」であって
+  「許可先へ何を送るか」ではない。保証範囲は [SECURITY.md](SECURITY.md) 参照。
+
+各判断の理由は [`docs/design/`](docs/design/) に:
+[分離モデル](docs/design/01-isolation-model.md) ·
+[egress](docs/design/02-default-deny-egress.md) ·
+[永続化](docs/design/03-persistent-auth-state.md) ·
+[YOLO 既定](docs/design/04-yolo-by-default.md) ·
+[ネストしたコンテナ](docs/design/05-nested-containers-rootless-podman.md) ·
+[焼き込み](docs/design/06-bake-tools-at-build-time.md)。
+
+## 前提
+
+- ホストに docker 互換 CLI。**動作確認は Docker(Docker Desktop)でのみ実施**。
+  エンジンは `CLAUDE_BOX_ENGINE`(既定 `docker`)で差し替えられるが、Podman ホストでの
+  動作は**未確認**(`--security-opt systempaths=unconfined` など Docker 固有オプションの
+  扱いが要検討)。
+- macOS または Linux。
+- コンテナは Linux の user namespace / iptables を使うため、Linux ホストや
+  Docker Desktop の Linux VM 上で動く。
+- Linux ホストで AppArmor が有効な場合、ネストしたコンテナには追加で
+  `--security-opt apparmor=unconfined` が要る(→ トラブルシューティング)。
+
+## セットアップ
+
+```sh
+# 1. イメージをビルド
+git clone <this-repo> claude-box && cd claude-box
+docker build -t claude-box:latest .
+
+# 2. 起動スクリプトを PATH に通す(例)
+ln -s "$PWD/claude-box" /usr/local/bin/claude-box
+```
+
+### ビルド引数
+
+焼き込むツールはビルド引数で選べる。既定は「全部入り」。
+
+| 引数 | 既定 | 効果 |
+|---|---|---|
+| `WITH_PODMAN` | `1` | rootless Podman(ネストしたコンテナ実行)一式。`0` で除外 |
+| `WITH_GO` | `1` | Go toolchain(pre-commit の golang フック用)。`0` で除外 |
+| `WITH_PLAYWRIGHT` | `1` | Playwright の Chromium。`0` で除外 |
+| `GH_VERSION` | 最新 | 焼き込む gh の版を固定 |
+| `PRE_COMMIT_VERSION` | 最新 | 焼き込む pre-commit の版を固定 |
+| `GO_VERSION` | 最新安定版 | 焼き込む Go の版を固定 |
+| `PLAYWRIGHT_VERSION` | 最新 | 焼き込む Chromium の版を固定 |
+
+`WITH_*=0` にした分だけイメージが小さく・ビルドが速くなる。焼き込む/焼き込まないを
+**選べる**ようにしただけで、[design 06](docs/design/06-bake-tools-at-build-time.md) の
+「実行時に取りに行かせず、ビルド時に焼き込む」方針は変えていない
+(`WITH_PLAYWRIGHT=0` にしても実行時に CDN からは取りに行かない)。
+
+- `WITH_PODMAN=0`: 箱の中で `docker`(= podman)が使えなくなる。実行時に
+  `CLAUDE_BOX_NESTED_CONTAINERS=1` を付けても意味はなく、egress の nested グループ
+  (container registry / OS ミラー)も不要になる。
+- `WITH_GO=0`: pre-commit の golang フックは実行時に Go を取りに行くが、`go.dev` /
+  `dl.google.com` は許可していないため失敗する(その種のフックを使うなら焼き込む)。
+
+```sh
+# 例: ネスト実行もブラウザ確認もしない最小構成
+docker build -t claude-box:latest \
+  --build-arg WITH_PODMAN=0 \
+  --build-arg WITH_GO=0 \
+  --build-arg WITH_PLAYWRIGHT=0 .
+```
+
+## 使い方
+
+```sh
+cd /path/to/your-project
+claude-box            # サンドボックス内の shell に入る
+claude-box claude     # 直接 claude を起動する場合
+```
+
+コンテナ内では `claude` と打つと YOLO で起動する(`login` / `update` / `mcp` などの
+管理系サブコマンドはフラグなしで素通し)。
+
+### 環境変数
+
+| 変数 | 効果 |
+|---|---|
+| `GH_TOKEN` | GitHub 操作(push/PR/issue)を許可。スコープを絞った短命トークンを**実行時だけ**渡す(保存しない) |
+| `CLAUDE_SKILLS_DIR` | 持ち込む自作スキルの置き場(読み書きマウント)。**未設定ならマウントしない**。存在しないパスはエラー |
+| `CLAUDE_BOX_GLOBAL_MD` | コンテナ内グローバル `CLAUDE.md` へ冪等追記する指示ファイル。**未設定なら何も注入しない** |
+| `CLAUDE_BOX_ENGINE` | コンテナエンジン(docker 互換 CLI)。既定 `docker`。動作確認は docker のみ |
+| `CLAUDE_BOX_IMAGE` | 使用するイメージ。既定 `claude-box:latest` |
+| `CLAUDE_BOX_NESTED_CONTAINERS=1` | コンテナ内 rootless Podman を有効化(緩和を付与)。**既定 off**(→ セキュリティモデル節) |
+| `CLAUDE_BOX_NO_GITCONFIG=1` | `~/.gitconfig` のマウントを無効化(壊れやすい設定の回避) |
+| `CLAUDE_BOX_REQUEST_DIR` | env-request の outbox にするホストフォルダ。**既定 on**(`~/.claude-box/requests`)。置き場を変えたいとき指定 |
+| `CLAUDE_BOX_NO_REQUEST_DIR=1` | env-request の outbox を無効化(既定 on) |
+| `EXTRA_ALLOW_DOMAINS` | egress 許可先を**追加**する(コアは常に含む。スペース区切り) |
+| `ALLOW_DOMAINS` | egress 許可リストを丸ごと上書き(スペース区切り。**コアは常に残る**) |
+| `SKIP_FIREWALL=1` | ファイアウォールを無効化(**egress 無制限**。警告表示あり) |
+
+### コンテナへ持ち込まれるもの(マウント)
+
+箱に入るホスト資源は次だけ。**ホーム全体はマウントしない**。
+
+| 持ち込むもの | マウント先 | 条件 / 備考 |
+|---|---|---|
+| カレントプロジェクト | **ホストと同じ絶対パス**(例 `/home/you/project`) | 常時・読み書き。Claude Code はカレントパスをキーに履歴を保存するため、固定 `/workspace` だと全プロジェクトの履歴が混ざる。**同じパスに見えるのはこのためで、ホームがマウントされているわけではない** |
+| 認証・設定ボリューム | `/home/node/.claude` | 常時。ホストの `~/.claude` とは**別**の専用ボリューム |
+| `~/.gitconfig` | `/home/node/.gitconfig`(ro) | ファイルが在るときだけ。`CLAUDE_BOX_NO_GITCONFIG=1` で無効化 |
+| 自作スキル | `/home/node/.claude/skills` | `CLAUDE_SKILLS_DIR` 指定時のみ・読み書き |
+| グローバル `CLAUDE.md` 追記ファイル | (冪等追記) | `CLAUDE_BOX_GLOBAL_MD` 指定時のみ |
+| コンテナ用ボリューム | `/home/node/.local/share/containers` | `CLAUDE_BOX_NESTED_CONTAINERS=1` のときだけ |
+| 要望の outbox | `/home/node/.claude-box/requests` | **既定 on**(ホスト `~/.claude-box/requests`・読み書き)。`CLAUDE_BOX_NO_REQUEST_DIR=1` で無効化 |
+
+`$HOME` や `/` からの起動は拒否する(誤って広くマウントしないため)。
+
+### オプション機能
+
+cmux は opt-in、env-request は既定 on:
+
+- **cmux 通知**(opt-in) — 箱の中の Claude の待機/完了通知を
+  [cmux](https://github.com/manaflow-ai/cmux) のペインへ中継する。
+  [`contrib/cmux/`](contrib/cmux/) 参照。
+- **環境への要望(`env-request`)** — **既定 on**: 箱の中の Claude が「この箱の環境を
+  変えたい」という要望を**ファイル**として outbox(`~/.claude-box/requests`)に落とし、
+  ホスト側の環境保守担当が確認する(GitHub もネットワークも使わない)。置き場は
+  `CLAUDE_BOX_REQUEST_DIR` で変更、`CLAUDE_BOX_NO_REQUEST_DIR=1` で無効化。
+  [`docs/env-request-operations.md`](docs/env-request-operations.md) 参照。
+
+## カスタマイズ
+
+大半のカスタマイズはコードを触らずに済む。まずここを見る(クローンのまま `git pull` で
+upstream を追い続けられる):
+
+- **egress**: `EXTRA_ALLOW_DOMAINS` で実行時に宛先を追加。
+- **焼き込みツール**: `WITH_PODMAN` / `WITH_GO` / `WITH_PLAYWRIGHT` と版指定の `--build-arg`。
+- **スキル / 指示 / エンジン / マウント / ネスト実行**: 上記の環境変数。
+
+knob で足りないもの(新しい焼き込みツール、イメージへの常設 egress、構造的な変更)を
+入れたいときだけコードを編集する。その場合は**フォーク**して自分の差分をコミットし、
+upstream の更新はマージで取り込む。任意機能の **env-request** はまさにこのための導線で、
+箱の中の Claude が要望を fork の outbox に落とし、あなたがブランチで確認・反映する
+([`docs/env-request-operations.md`](docs/env-request-operations.md) 参照)。
+
+## トラブルシューティング
+
+**`Executable doesn't exist at .../chromium-XXXX/`** — 焼き込んだ Playwright の
+Chromium が、プロジェクト側の `@playwright/test` と噛み合っていない。版を固定して
+再ビルドする: `docker build --build-arg PLAYWRIGHT_VERSION=<ver> ...`。実行時に取りに
+行かせない代わりの制約([design 06](docs/design/06-bake-tools-at-build-time.md))。
+
+**何かが繋がらない** — egress プロキシのログで**どのホスト名が拒否されたか**を見る
+(`upstream=""` / `allowed=0` が拒否):
+
+```sh
+grep 'upstream=""' /var/log/egress-proxy/tls.log    # TLS(443)
+grep 'allowed=0'   /var/log/egress-proxy/http.log   # 平文 HTTP(80)
+```
+
+許可するには `EXTRA_ALLOW_DOMAINS`(実行時)か `init-firewall.sh` の `DOMAINS`
+(イメージ側)に足す。
+
+**ネストした `docker` / `compose` が動かない** — ネストしたコンテナは既定 off。
+`CLAUDE_BOX_NESTED_CONTAINERS=1` で有効化する(かつ `WITH_PODMAN` が焼き込まれて
+いること)。`docker pull` は通るのに `docker run` が `Invalid argument` で失敗する
+場合は containers ボリュームが無い([design 05](docs/design/05-nested-containers-rootless-podman.md))。
+Linux ホストで AppArmor が有効なら `--security-opt apparmor=unconfined` も足す。
+
+**箱の中で git が失敗する** — マウントした `~/.gitconfig` が、コンテナ内で解決できない
+設定(`includeIf`・署名鍵のパス・`credential.helper=osxkeychain` 等)を参照している
+可能性がある。`CLAUDE_BOX_NO_GITCONFIG=1` でマウントを切るか、必要な値だけを個別に
+渡す(箱の中で `user.name` / `user.email` を `git config` する 等)。
+
+## セキュリティモデルの要点
+
+「YOLO を安全に回す」ために、次を**不変条件**として維持している:
+
+- 非 root・`--cap-drop=ALL`(必要な cap だけ追加)を崩さない。
+- egress はデフォルト拒否のまま。宛先追加は許可リストへの明示追記で行う。
+- コンテナ内コンテナは rootless Podman のみ。DinD(`--privileged`)や
+  ホスト docker socket マウントは採用しない。
+- 意図的な非許可: AWS API は開けない(terraform は `validate` まで)。
+
+これらを緩めると YOLO 既定([design 04](docs/design/04-yolo-by-default.md))の前提が
+崩れる。崩す変更には設計文書が要る。**ネストしたコンテナ**は既定 off で、有効時のみ
+`seccomp`/`systempaths=unconfined` とデバイスを付与する — **追加 capability は無し・
+非 root のまま・`--privileged` ではない**(詳細:
+[design 05](docs/design/05-nested-containers-rootless-podman.md))。
+
+**保証しないこと**と脆弱性の**報告窓口**は [SECURITY.md](SECURITY.md) にまとめてある。
+
+## ファイル構成
+
+| パス | 役割 |
+|---|---|
+| `Dockerfile` | イメージ定義(ツール類・rootless Podman・非 root 化) |
+| `claude-box` | ホスト側の起動スクリプト(マウント・capability・通知ブリッジ) |
+| `entrypoint.sh` | firewall 初期化・グローバル `CLAUDE.md` の任意マージ・フック/plugin 注入 |
+| `init-firewall.sh` | デフォルト拒否 egress(iptables 透過リダイレクト + ホスト名判定) |
+| `egress-proxy.conf` | 許可判定を行うプロキシ(SNI / Host ヘッダ)の nginx 設定 |
+| `bashrc-claude` | `claude` を YOLO 起動にするラッパ |
+| `contrib/cmux/` | cmux 通知ブリッジ(オプトイン。既定 off) |
+| `claude-box-request` / `plugins/box-core/` | 任意の env-request スキル + CLI |
+| `docs/design/` | 設計文書 |
+
+## ライセンス
+
+MIT — [LICENSE](LICENSE) 参照。Copyright (c) 2026 Takeshi Yamazaki。
+
+## コントリビュート
+
+変更の検証方法・セキュリティ不変条件・コミット / egress 追加の規約は
+[CONTRIBUTING.md](CONTRIBUTING.md) にまとめてある。

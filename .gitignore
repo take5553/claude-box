@@ -1,0 +1,23 @@
+# macOS
+.DS_Store
+
+# Editors / IDEs
+*.swp
+*~
+.idea/
+.vscode/
+
+# Local temp files / logs
+*.log
+tmp/
+scratchpad/
+
+# Local override settings (a place for files kept uncommitted)
+*.local
+
+# Claude Code local override settings (host-specific; not published)
+.claude/settings.local.json
+
+# Python bytecode cache
+__pycache__/
+*.pyc

@@ -1,0 +1,199 @@
+#!/usr/bin/env bash
+# ---------------------------------------------------------------------------
+# Launch an isolated, egress-restricted Claude Code container, mounting
+# "only the project directory you are currently in".
+# Inside the container, claude runs as the node (non-root) user.
+#
+# Usage:
+#   cd ~/dev/project-A
+#   claude-box                                  # enter a shell inside the sandbox
+#   claude-box claude --dangerously-skip-permissions   # to launch directly
+# ---------------------------------------------------------------------------
+set -euo pipefail
+
+# The engine (a docker-compatible CLI) and the image can be overridden via
+# environment variables. Verified with docker; behavior on a podman host is
+# unverified (Docker-specific options such as --security-opt systempaths need
+# review. See README).
+ENGINE="${CLAUDE_BOX_ENGINE:-docker}"
+IMAGE="${CLAUDE_BOX_IMAGE:-claude-box:latest}"
+CONFIG_VOLUME="claude-box-config"        # where credentials live (separate from the host's ~/.claude)
+CONTAINERS_VOLUME="claude-box-containers" # rootless Podman's image store.
+                                          # Not just for caching but a **functional
+                                          # requirement**: without it, graphRoot
+                                          # lands on Docker's overlayfs, producing
+                                          # overlay on overlay, and exec in the
+                                          # nested container fails with
+                                          # Invalid argument (design 05)
+
+# Reject launching from $HOME or / to avoid accidentally mounting too broadly
+if [ "$PWD" = "$HOME" ] || [ "$PWD" = "/" ]; then
+  echo "Refusing to launch from $PWD. cd into the target project first." >&2
+  exit 1
+fi
+
+"$ENGINE" volume inspect "$CONFIG_VOLUME" >/dev/null 2>&1 || "$ENGINE" volume create "$CONFIG_VOLUME" >/dev/null
+# CONTAINERS_VOLUME (for nesting) is only created when CLAUDE_BOX_NESTED_CONTAINERS=1 (below).
+
+# Share git identity (name / signing) read-only (only when the file exists).
+# Can be disabled with CLAUDE_BOX_NO_GITCONFIG=1. ~/.gitconfig may contain settings
+# that cannot be resolved inside the container -- includeIf / signing-key paths /
+# credential.helper=osxkeychain -- and can break git (see README for a workaround).
+GITCONFIG_MOUNT=()
+if [ -z "${CLAUDE_BOX_NO_GITCONFIG:-}" ] && [ -f "$HOME/.gitconfig" ]; then
+  GITCONFIG_MOUNT=(-v "$HOME/.gitconfig:/home/node/.gitconfig:ro")
+fi
+
+# Bring in your own skills (read-write / Claude can edit and generate them).
+# Not mounted by default. Enabled only when CLAUDE_SKILLS_DIR is set
+# (minimal-mount principle = design 01).
+#   e.g.: CLAUDE_SKILLS_DIR=~/dev/my-skills claude-box
+# If it is set but the directory does not exist, stop with an explicit error
+# rather than creating it (guards against typos).
+SKILLS_MOUNT=()
+if [ -n "${CLAUDE_SKILLS_DIR:-}" ]; then
+  if [ -d "$CLAUDE_SKILLS_DIR" ]; then
+    SKILLS_MOUNT=(-v "$CLAUDE_SKILLS_DIR:/home/node/.claude/skills")
+  else
+    echo "claude-box: CLAUDE_SKILLS_DIR=$CLAUDE_SKILLS_DIR does not exist as a directory" >&2
+    exit 1
+  fi
+fi
+
+# Optional: an instructions file appended to the container's global CLAUDE.md
+# (nothing is injected by default). Only when CLAUDE_BOX_GLOBAL_MD is given a file
+# path on the host is it mounted read-only, and entrypoint appends it idempotently
+# (restored even when the volume is recreated). The default is "do nothing" so that
+# personal preferences are not injected into someone else's box without consent.
+GLOBAL_MD_MOUNT=()
+if [ -n "${CLAUDE_BOX_GLOBAL_MD:-}" ]; then
+  if [ -f "$CLAUDE_BOX_GLOBAL_MD" ]; then
+    GLOBAL_MD_MOUNT=(-v "$CLAUDE_BOX_GLOBAL_MD:/etc/claude-box/global-CLAUDE.md:ro")
+  else
+    echo "claude-box: CLAUDE_BOX_GLOBAL_MD=$CLAUDE_BOX_GLOBAL_MD not found (skipping injection)" >&2
+  fi
+fi
+
+# Only when you want to allow GitHub operations (push / PR / issue / merge),
+# pass a scope-limited, short-lived token *at runtime only* (never stored).
+#   GH_TOKEN="$(security find-generic-password -s claude-box-gh -w)" claude-box
+GH_ENV=()
+[ -n "${GH_TOKEN:-}" ] && GH_ENV=(-e "GH_TOKEN=${GH_TOKEN}")
+
+# Request outbox for the env-request feature (on by default). The in-box Claude drops
+# change-request files here for a maintainer to review on the host (no GitHub, no
+# network). Defaults to ~/.claude-box/requests; override the host location with
+# CLAUDE_BOX_REQUEST_DIR, or turn the feature off entirely with
+# CLAUDE_BOX_NO_REQUEST_DIR=1. Keep this a dedicated drop folder — not your source
+# tree — and treat whatever lands in it as untrusted (docs/env-request-operations.md).
+REQUEST_DIR_MOUNT=()
+REQUEST_DIR_ENV=()
+if [ -z "${CLAUDE_BOX_NO_REQUEST_DIR:-}" ]; then
+  REQUEST_DIR="${CLAUDE_BOX_REQUEST_DIR:-$HOME/.claude-box/requests}"
+  mkdir -p "$REQUEST_DIR"
+  REQUEST_DIR_MOUNT=(-v "$REQUEST_DIR:/home/node/.claude-box/requests")
+  REQUEST_DIR_ENV=(-e "CLAUDE_BOX_REQUEST_DIR=/home/node/.claude-box/requests")
+fi
+
+# Normalize terminal colors (avoid color mismatches on terminals lacking terminfo)
+TERM_ENV=(-e TERM=xterm-256color -e COLORTERM=truecolor -e LANG=C.UTF-8)
+
+# Notification bridge (opt-in; the cmux-specific implementation is split out into
+# contrib/cmux/). When CLAUDE_BOX_NOTIFY_BRIDGE points to an executable, the host
+# launches it and reads the port number printed on the first line of stdout. That
+# port is passed to the container as CLAUDE_BOX_BRIDGE_PORT together with a
+# host.docker.internal mapping, so the in-container Claude's hook can forward
+# notifications there. If the bridge exits without printing anything (= nothing to
+# attach to), launch without a bridge. contrib/cmux/notify-bridge is one example
+# of an implementation that satisfies this contract.
+BRIDGE_ENV=()
+BRIDGE_PID=""
+if [ -n "${CLAUDE_BOX_NOTIFY_BRIDGE:-}" ] && [ -x "$CLAUDE_BOX_NOTIFY_BRIDGE" ]; then
+  BRIDGE_PORT_FILE="$(mktemp)"
+  "$CLAUDE_BOX_NOTIFY_BRIDGE" > "$BRIDGE_PORT_FILE" &
+  BRIDGE_PID=$!
+  BRIDGE_PORT=""
+  for _ in $(seq 1 40); do
+    BRIDGE_PORT="$(head -n1 "$BRIDGE_PORT_FILE" 2>/dev/null || true)"
+    [ -n "$BRIDGE_PORT" ] && break
+    kill -0 "$BRIDGE_PID" 2>/dev/null || break  # don't keep waiting if the bridge exited immediately (declined)
+    sleep 0.05
+  done
+  rm -f "$BRIDGE_PORT_FILE"
+  if [ -n "$BRIDGE_PORT" ]; then
+    # host.docker.internal resolves automatically on Docker Desktop, but declare it
+    # explicitly in /etc/hosts so it also works on a Linux engine (the firewall side
+    # resolves it via getent)
+    BRIDGE_ENV=(-e "CLAUDE_BOX_BRIDGE_PORT=${BRIDGE_PORT}" --add-host=host.docker.internal:host-gateway)
+  else
+    kill "$BRIDGE_PID" 2>/dev/null || true
+    BRIDGE_PID=""
+    echo "claude-box: WARN notification bridge returned no port (continuing without notifications)" >&2
+  fi
+fi
+cleanup() { [ -n "$BRIDGE_PID" ] && kill "$BRIDGE_PID" 2>/dev/null || true; }
+trap cleanup EXIT
+
+# Nested container execution (rootless Podman inside the container) is off by
+# default. Only when used is it loosened via CLAUDE_BOX_NESTED_CONTAINERS=1 (don't
+# loosen by default for people who don't use it). The following are added, all for
+# the in-container Podman. Caps are not increased; this is distinct from --privileged
+# DinD (the nested side's egress also goes through the outer firewall). The rationale
+# and default are also stated in the security section of the README.
+#   seccomp=unconfined     : the default profile blocks mount etc. inside a user namespace
+#   systempaths=unconfined : removes the /proc mask (without it the nested side cannot
+#                            remount /proc and fails to start). Non-root operation, so
+#                            /proc/sys still cannot be written
+#   /dev/fuse              : for the fuse-overlayfs fallback on paths where overlay is unavailable
+#   /dev/net/tun           : for creating the tap of the nested-side network (pasta/slirp4netns)
+#   dedicated volume       : moves graphRoot off Docker's overlay (overlay on overlay).
+#                            without it, nested-side exec fails with Invalid argument (design 05)
+#   (on a Linux host with AppArmor enabled, --security-opt apparmor=unconfined is also required)
+NESTED_OPTS=()
+if [ "${CLAUDE_BOX_NESTED_CONTAINERS:-0}" = "1" ]; then
+  "$ENGINE" volume inspect "$CONTAINERS_VOLUME" >/dev/null 2>&1 || "$ENGINE" volume create "$CONTAINERS_VOLUME" >/dev/null
+  NESTED_OPTS=(
+    --security-opt seccomp=unconfined
+    --security-opt systempaths=unconfined
+    --device /dev/fuse
+    --device /dev/net/tun
+    -v "$CONTAINERS_VOLUME:/home/node/.local/share/containers"
+  )
+fi
+
+# Mount the project at the same absolute path as on the host (and match -w). Claude
+# Code saves history keyed by the current path, so a fixed /workspace would mix the
+# history of every project under the same key. See README for the list of host
+# resources brought into the container.
+#
+# --cap-drop=ALL drops everything, then adds back only the needed capabilities:
+#   NET_ADMIN/NET_RAW = firewall (iptables); SETUID/SETGID = for the firewall's limited
+#     sudo and for launching the egress proxy under a dedicated uid (design 02)
+#   AUDIT_WRITE = sending sudo's audit messages (without it, warning noise appears)
+# Make it work even for invocations without a TTY (via script / pipe)
+TTY_FLAGS=(-it)
+[ -t 0 ] || TTY_FLAGS=(-i)
+
+# Run in the foreground rather than exec (so the EXIT trap can clean up the bridge on exit)
+"$ENGINE" run --rm "${TTY_FLAGS[@]}" \
+  --cap-drop=ALL \
+  --cap-add=NET_ADMIN \
+  --cap-add=NET_RAW \
+  --cap-add=SETUID \
+  --cap-add=SETGID \
+  --cap-add=AUDIT_WRITE \
+  "${NESTED_OPTS[@]}" \
+  -v "$PWD:$PWD" \
+  -v "$CONFIG_VOLUME:/home/node/.claude" \
+  "${SKILLS_MOUNT[@]}" \
+  "${GLOBAL_MD_MOUNT[@]}" \
+  "${GITCONFIG_MOUNT[@]}" \
+  "${GH_ENV[@]}" \
+  "${REQUEST_DIR_MOUNT[@]}" \
+  "${REQUEST_DIR_ENV[@]}" \
+  "${TERM_ENV[@]}" \
+  "${BRIDGE_ENV[@]}" \
+  -w "$PWD" \
+  "$IMAGE" \
+  "$@"
+

@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Forward a Claude Code hook's stdin (JSON) to the host-side notification bridge
+# that claude-box started. This runs inside the container and is generic: it only
+# POSTs the hook payload to the bridge port. No bridge (CLAUDE_BOX_BRIDGE_PORT
+# unset) means a non-bridge launch, so do nothing. A failed forward only costs a
+# missed notification, so never error back to Claude.
+#
+# Baked into the image as /usr/local/bin/claude-box-notify-forward and wired up by
+# contrib/cmux/hooks.json (injected via --settings when the bridge is active).
+[ -n "${CLAUDE_BOX_BRIDGE_PORT:-}" ] || exit 0
+curl -s -o /dev/null -m 5 -X POST \
+  -H 'Content-Type: application/json' --data-binary @- \
+  "http://host.docker.internal:${CLAUDE_BOX_BRIDGE_PORT}/$1" || true

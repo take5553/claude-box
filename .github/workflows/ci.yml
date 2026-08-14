@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Errors only for now, so intentional patterns (e.g. word-splitting the
+      # domain list) do not fail the build. Tighten --severity as the scripts are
+      # cleaned up.
+      - name: shellcheck
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck
+          shellcheck --severity=error \
+            claude-box claude-box-request entrypoint.sh init-firewall.sh \
+            bashrc-claude contrib/cmux/hook-forward scripts/smoke.sh
+      - name: hadolint
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+          failure-threshold: error
+
+  # scripts/smoke.sh builds the image (without Chromium, to stay fast; nginx and
+  # iptables are in the base layers regardless) and checks the sandbox invariants:
+  # the firewall startup self-check, that a disallowed host is blocked, and that it
+  # runs non-root with no effective capabilities. The firewall check needs
+  # NET_ADMIN + the firewall caps on the runner; if a runner cannot grant these,
+  # run scripts/smoke.sh on real hardware instead.
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: smoke test
+        run: ./scripts/smoke.sh
+
+  # Cheap check that the fully-minimal image (no Podman / Go / Playwright) still
+  # builds — exercises the WITH_*=0 opt-out paths.
+  build-minimal:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: build image (all WITH_*=0)
+        run: |
+          docker build \
+            --build-arg WITH_PODMAN=0 \
+            --build-arg WITH_GO=0 \
+            --build-arg WITH_PLAYWRIGHT=0 \
+            -t claude-box:minimal .
