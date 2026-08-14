@@ -22,8 +22,10 @@ keeping the blast radius inside the box: two walls — **file isolation** and a
   force-redirected through a local proxy that allows only a whitelist by TLS SNI /
   HTTP Host. TLS is **not** decrypted.
 - Auth and settings persist in a dedicated volume, kept separate from the host's.
-  Your global `settings.json` / `settings.local.json` are imported **one-way**
-  (mounted read-only, merged in at startup — the host's copy is never written).
+  Named items of your `~/.claude` — settings, global `CLAUDE.md`, agents, commands —
+  are imported **read-only** so a box behaves like the Claude you configured;
+  `skills/` is the one read-write exception, so skills written in the box persist
+  ([design 09](docs/design/09-import-host-claude-config.md)).
 
 **Deliberately closed** (the point, not an oversight)
 
@@ -117,13 +119,17 @@ Inside the box, typing `claude` launches it in YOLO mode; management subcommands
 | Variable | Effect |
 |---|---|
 | `GH_TOKEN` | Allow GitHub operations (push/PR/issue). Pass a narrowly-scoped, short-lived token **only at runtime** (never stored). |
-| `CLAUDE_SKILLS_DIR` | Directory of your own skills (read-write mount). **Not mounted if unset.** A non-existent path is an error. |
-| `CLAUDE_BOX_GLOBAL_MD` | A file idempotently appended to the container's global `CLAUDE.md`. **Nothing is injected if unset.** |
+| `CLAUDE_SKILLS_DIR` | Skills directory to mount (read-write) **instead of** the host's `~/.claude/skills`. A non-existent path is an error. |
+| `CLAUDE_BOX_GLOBAL_MD` | Instructions file to use **instead of** the host's `~/.claude/CLAUDE.md`. It *replaces* the container's global `CLAUDE.md` at every launch. |
 | `CLAUDE_BOX_ENGINE` | Container engine (docker-compatible CLI). Default `docker`; only docker is verified. |
 | `CLAUDE_BOX_IMAGE` | Image to run. Default `claude-box:latest`. |
 | `CLAUDE_BOX_NESTED_CONTAINERS=1` | Enable in-container rootless Podman (adds relaxations). **Off by default** — see [Security model](#security-model). |
 | `CLAUDE_BOX_NO_GITCONFIG=1` | Do not mount `~/.gitconfig` (avoids host-specific settings breaking git). |
-| `CLAUDE_BOX_NO_SETTINGS=1` | Do not import the host's global `settings.json` / `settings.local.json` (imported by default). |
+| `CLAUDE_BOX_NO_HOST_CONFIG=1` | Import nothing from the host's `~/.claude` — settings, skills, `CLAUDE.md`, agents, commands (all imported by default). |
+| `CLAUDE_BOX_NO_SETTINGS=1` | Do not import the host's global `settings.json` / `settings.local.json`. |
+| `CLAUDE_BOX_NO_SKILLS=1` | Do not mount the host's `~/.claude/skills`. |
+| `CLAUDE_BOX_NO_GLOBAL_MD=1` | Do not import the host's global `CLAUDE.md`. |
+| `CLAUDE_BOX_NO_AGENTS=1` / `CLAUDE_BOX_NO_COMMANDS=1` | Do not mount the host's `~/.claude/agents` / `commands`. |
 | `CLAUDE_BOX_REQUEST_DIR` | Host folder for the env-request outbox. **On by default** (`~/.claude-box/requests`); set this to relocate it. |
 | `CLAUDE_BOX_NO_REQUEST_DIR=1` | Turn off the env-request outbox (on by default). |
 | `EXTRA_ALLOW_DOMAINS` | **Add** egress destinations (core always included; space-separated). |
@@ -140,8 +146,9 @@ Only these host resources enter the box. **The home directory is not mounted.**
 | Auth/settings volume | `/home/node/.claude` | always. A dedicated volume, **separate** from the host's `~/.claude`. |
 | `~/.gitconfig` | `/home/node/.gitconfig` (ro) | only if the file exists. Disable with `CLAUDE_BOX_NO_GITCONFIG=1`. |
 | Global `settings.json` / `settings.local.json` | `/etc/claude-box/host-settings*.json` (ro), merged into `/home/node/.claude/` | **default on**, only for files that exist. Read-only + merged, so the host's copy is never written ([design 08](docs/design/08-host-global-settings-import.md)). Disable with `CLAUDE_BOX_NO_SETTINGS=1`. |
-| Your skills | `/home/node/.claude/skills` | only if `CLAUDE_SKILLS_DIR` is set (read-write). |
-| Global `CLAUDE.md` addendum | (idempotent append) | only if `CLAUDE_BOX_GLOBAL_MD` is set. |
+| `~/.claude/skills` | `/home/node/.claude/skills` (**read-write**) | **default on** if the directory exists. Read-write on purpose — skills written in the box persist, and that is the one path where the box writes to the host ([design 09](docs/design/09-import-host-claude-config.md)). `CLAUDE_SKILLS_DIR` points it elsewhere; `CLAUDE_BOX_NO_SKILLS=1` disables it. |
+| `~/.claude/agents`, `~/.claude/commands` | matching paths under `/home/node/.claude` (ro) | **default on** if they exist. Read-only, so creating one *inside* the box does not save. Disable with `CLAUDE_BOX_NO_AGENTS=1` / `CLAUDE_BOX_NO_COMMANDS=1`. |
+| Global `CLAUDE.md` | `/etc/claude-box/global-CLAUDE.md` (ro) → **replaces** `/home/node/.claude/CLAUDE.md` | **default on** if the file exists. Replaced at every launch, so in-box edits do not survive. Source overridable with `CLAUDE_BOX_GLOBAL_MD`; disable with `CLAUDE_BOX_NO_GLOBAL_MD=1`. |
 | Containers volume | `/home/node/.local/share/containers` | only if `CLAUDE_BOX_NESTED_CONTAINERS=1`. |
 | Request outbox | `/home/node/.claude-box/requests` | **default on** (host `~/.claude-box/requests`, read-write); disable with `CLAUDE_BOX_NO_REQUEST_DIR=1`. |
 
@@ -208,6 +215,13 @@ point at commands or paths that exist only on the host (`hooks`, `statusLine`,
 host-specific entries out of the global `settings.json`. Note that a merged key is
 not removed by deleting it on the host — edit it inside the box, or recreate the
 `claude-box-config` volume ([design 08](docs/design/08-host-global-settings-import.md)).
+
+**The box's global `CLAUDE.md` keeps reverting / an old skill reappeared** — the
+host's `~/.claude` is imported at every launch: `CLAUDE.md` is *replaced* by the
+host's file (edit it on the host, not in the box), and the host's `skills`, `agents`
+and `commands` directories are mounted over whatever the box's volume had at those
+paths. `CLAUDE_BOX_NO_HOST_CONFIG=1` gives you a box with none of it
+([design 09](docs/design/09-import-host-claude-config.md)).
 
 **git fails inside the box** — the mounted `~/.gitconfig` may reference things the
 container cannot resolve (`includeIf`, signing-key paths,

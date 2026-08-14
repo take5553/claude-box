@@ -11,17 +11,20 @@ fi
 
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-/home/node/.claude}"
 
-# Optional: append to the global CLAUDE.md (by default nothing is injected).
-# Only when CLAUDE_BOX_GLOBAL_MD is set on the host is its content mounted read-only
-# at the path below. It appends per line "only if absent", so it is restored even after
-# recreating the volume and never duplicates across two launches (the idempotent-append
-# mechanism itself is kept).
+# The global CLAUDE.md: claude-box mounts the host's ~/.claude/CLAUDE.md (or the file
+# named by CLAUDE_BOX_GLOBAL_MD) read-only at the path below, and we *replace* the
+# box's copy with it on every launch. Replace, not append: the box's instructions are
+# then exactly what the host file says today, so deleting a line on the host deletes
+# it here too -- stale instructions that quietly keep steering Claude are worse than
+# a lost in-box edit. The flip side, in return: anything written to the box's
+# CLAUDE.md from inside is gone on the next launch (design 09; this supersedes the
+# line-by-line append of design 03).
+# Copied via cat rather than cp so the box's copy stays writable (the source is a
+# read-only mount) and via a temp file so a failed write cannot truncate it.
 GLOBAL_MD_SRC="/etc/claude-box/global-CLAUDE.md"
 if [ -f "$GLOBAL_MD_SRC" ]; then
   CLAUDE_MD="$CONFIG_DIR/CLAUDE.md"
-  while IFS= read -r line; do
-    grep -qxF "$line" "$CLAUDE_MD" 2>/dev/null || printf '%s\n' "$line" >> "$CLAUDE_MD"
-  done < "$GLOBAL_MD_SRC"
+  cat "$GLOBAL_MD_SRC" > "$CLAUDE_MD.tmp" && mv "$CLAUDE_MD.tmp" "$CLAUDE_MD"
 fi
 
 # Bring in the host's global settings (settings.json / settings.local.json), which

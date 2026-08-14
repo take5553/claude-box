@@ -2,7 +2,10 @@
 
 Related: [03 — persistent auth and state](03-persistent-auth-state.md),
 [01 — isolation model](01-isolation-model.md),
-[04 — YOLO by default](04-yolo-by-default.md)
+[04 — YOLO by default](04-yolo-by-default.md),
+[09 — importing the rest of the host's Claude config](09-import-host-claude-config.md)
+(which extends this to skills, instructions, agents and commands — and, for
+`skills/` only, deliberately opens the write direction this note closes)
 
 ## Context
 
@@ -38,14 +41,13 @@ letting anything out?
   the box's counterpart with jq's recursive `*`. Keys the box set on its own survive;
   keys present on the host overwrite; arrays (`permissions.allow`, …) are taken from
   the host wholesale. Editing the host file takes effect on the next start, and
-  recreating the volume restores the settings — the same "idempotent init" property
-  as the global `CLAUDE.md` merge in [03](03-persistent-auth-state.md).
+  recreating the volume restores the settings — the "idempotent init" property the
+  box relies on elsewhere ([03](03-persistent-auth-state.md)).
 - **On by default, opt out with `CLAUDE_BOX_NO_SETTINGS=1`**, following `~/.gitconfig`
   ([01](01-isolation-model.md)): an existing host config file is brought in read-only
-  when it is there, and one flag turns it off. This differs from `CLAUDE_BOX_GLOBAL_MD`,
-  which stays opt-in — that one *authors instructions* for Claude, while these are the
-  same user's own Claude Code configuration on the same machine, and the failure mode
-  is a broken hook, not a surprise instruction.
+  when it is there, and one flag turns it off. ([09](09-import-host-claude-config.md)
+  later applies the same default to the rest of the host's `~/.claude`, and adds
+  `CLAUDE_BOX_NO_HOST_CONFIG=1` for the whole family.)
 - **A malformed host file is skipped with a warning**, never fatal: a typo in
   `settings.json` must not make the box unlaunchable.
 

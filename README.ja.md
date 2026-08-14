@@ -19,9 +19,10 @@
   からの起動は拒否する。
 - **egress は既定拒否・ホスト名で判定**。80/443 は透過リダイレクトでローカルプロキシへ
   強制的に通し、TLS の SNI / HTTP の Host のホワイトリストだけを許可する。TLS は復号しない。
-- 認証・設定は専用ボリュームに永続化し、ホスト側とは分離する。ホストのグローバル
-  `settings.json` / `settings.local.json` だけは**片方向**で持ち込む(ro マウント →
-  起動時にマージ。ホスト側のファイルには一切書き戻さない)。
+- 認証・設定は専用ボリュームに永続化し、ホスト側とは分離する。ただしホスト `~/.claude`
+  の**一部**(設定・グローバル `CLAUDE.md`・agents・commands)は **ro** で持ち込み、
+  普段の Claude と同じ挙動にする。`skills/` だけは箱で書いたスキルを残すため rw
+  ([design 09](docs/design/09-import-host-claude-config.md))。
 
 **意図的に開けていないもの**(見落としではなく、これが要点)
 
@@ -113,13 +114,17 @@ claude-box claude     # 直接 claude を起動する場合
 | 変数 | 効果 |
 |---|---|
 | `GH_TOKEN` | GitHub 操作(push/PR/issue)を許可。スコープを絞った短命トークンを**実行時だけ**渡す(保存しない) |
-| `CLAUDE_SKILLS_DIR` | 持ち込む自作スキルの置き場(読み書きマウント)。**未設定ならマウントしない**。存在しないパスはエラー |
-| `CLAUDE_BOX_GLOBAL_MD` | コンテナ内グローバル `CLAUDE.md` へ冪等追記する指示ファイル。**未設定なら何も注入しない** |
+| `CLAUDE_SKILLS_DIR` | ホストの `~/.claude/skills` の**代わりに**マウントするスキル置き場(読み書き)。存在しないパスはエラー |
+| `CLAUDE_BOX_GLOBAL_MD` | ホストの `~/.claude/CLAUDE.md` の**代わりに**使う指示ファイル。箱のグローバル `CLAUDE.md` を毎起動で*置換*する |
 | `CLAUDE_BOX_ENGINE` | コンテナエンジン(docker 互換 CLI)。既定 `docker`。動作確認は docker のみ |
 | `CLAUDE_BOX_IMAGE` | 使用するイメージ。既定 `claude-box:latest` |
 | `CLAUDE_BOX_NESTED_CONTAINERS=1` | コンテナ内 rootless Podman を有効化(緩和を付与)。**既定 off**(→ セキュリティモデル節) |
 | `CLAUDE_BOX_NO_GITCONFIG=1` | `~/.gitconfig` のマウントを無効化(壊れやすい設定の回避) |
-| `CLAUDE_BOX_NO_SETTINGS=1` | ホストのグローバル `settings.json` / `settings.local.json` の持ち込みを無効化(既定 on) |
+| `CLAUDE_BOX_NO_HOST_CONFIG=1` | ホスト `~/.claude` からの持ち込みを全部無効化(設定・skills・`CLAUDE.md`・agents・commands。いずれも既定 on) |
+| `CLAUDE_BOX_NO_SETTINGS=1` | ホストのグローバル `settings.json` / `settings.local.json` の持ち込みを無効化 |
+| `CLAUDE_BOX_NO_SKILLS=1` | ホストの `~/.claude/skills` のマウントを無効化 |
+| `CLAUDE_BOX_NO_GLOBAL_MD=1` | ホストのグローバル `CLAUDE.md` の持ち込みを無効化 |
+| `CLAUDE_BOX_NO_AGENTS=1` / `CLAUDE_BOX_NO_COMMANDS=1` | ホストの `~/.claude/agents` / `commands` のマウントを無効化 |
 | `CLAUDE_BOX_REQUEST_DIR` | env-request の outbox にするホストフォルダ。**既定 on**(`~/.claude-box/requests`)。置き場を変えたいとき指定 |
 | `CLAUDE_BOX_NO_REQUEST_DIR=1` | env-request の outbox を無効化(既定 on) |
 | `EXTRA_ALLOW_DOMAINS` | egress 許可先を**追加**する(コアは常に含む。スペース区切り) |
@@ -136,8 +141,9 @@ claude-box claude     # 直接 claude を起動する場合
 | 認証・設定ボリューム | `/home/node/.claude` | 常時。ホストの `~/.claude` とは**別**の専用ボリューム |
 | `~/.gitconfig` | `/home/node/.gitconfig`(ro) | ファイルが在るときだけ。`CLAUDE_BOX_NO_GITCONFIG=1` で無効化 |
 | グローバル `settings.json` / `settings.local.json` | `/etc/claude-box/host-settings*.json`(ro)→ `/home/node/.claude/` へマージ | **既定 on**・在るファイルだけ。ro マウント＋マージなのでホスト側は書き換わらない([design 08](docs/design/08-host-global-settings-import.md))。`CLAUDE_BOX_NO_SETTINGS=1` で無効化 |
-| 自作スキル | `/home/node/.claude/skills` | `CLAUDE_SKILLS_DIR` 指定時のみ・読み書き |
-| グローバル `CLAUDE.md` 追記ファイル | (冪等追記) | `CLAUDE_BOX_GLOBAL_MD` 指定時のみ |
+| `~/.claude/skills` | `/home/node/.claude/skills`(**読み書き**) | ディレクトリが在れば**既定 on**。箱で書いたスキルを残すため意図的に rw = 箱がホストへ書ける唯一の経路([design 09](docs/design/09-import-host-claude-config.md))。`CLAUDE_SKILLS_DIR` で別の場所に差し替え、`CLAUDE_BOX_NO_SKILLS=1` で無効化 |
+| `~/.claude/agents`・`~/.claude/commands` | `/home/node/.claude` 配下の同名パス(ro) | 在れば**既定 on**。ro なので箱の中で新規作成しても保存されない。`CLAUDE_BOX_NO_AGENTS=1` / `CLAUDE_BOX_NO_COMMANDS=1` で無効化 |
+| グローバル `CLAUDE.md` | `/etc/claude-box/global-CLAUDE.md`(ro)→ `/home/node/.claude/CLAUDE.md` を**置換** | ファイルが在れば**既定 on**。毎起動で置換するので箱の中での編集は残らない。`CLAUDE_BOX_GLOBAL_MD` で差し替え、`CLAUDE_BOX_NO_GLOBAL_MD=1` で無効化 |
 | コンテナ用ボリューム | `/home/node/.local/share/containers` | `CLAUDE_BOX_NESTED_CONTAINERS=1` のときだけ |
 | 要望の outbox | `/home/node/.claude-box/requests` | **既定 on**(ホスト `~/.claude-box/requests`・読み書き)。`CLAUDE_BOX_NO_REQUEST_DIR=1` で無効化 |
 
@@ -194,6 +200,12 @@ grep 'allowed=0'   /var/log/egress-proxy/http.log   # 平文 HTTP(80)
 いること)。`docker pull` は通るのに `docker run` が `Invalid argument` で失敗する
 場合は containers ボリュームが無い([design 05](docs/design/05-nested-containers-rootless-podman.md))。
 Linux ホストで AppArmor が有効なら `--security-opt apparmor=unconfined` も足す。
+
+**箱のグローバル `CLAUDE.md` が戻る / 古いスキルが復活する** — ホストの `~/.claude` は
+毎起動で持ち込まれる。`CLAUDE.md` はホストのファイルで*置換*され(編集は箱ではなく
+ホスト側で行う)、ホストの `skills`・`agents`・`commands` はボリューム側の同名パスに
+被さる。全部要らないときは `CLAUDE_BOX_NO_HOST_CONFIG=1`
+([design 09](docs/design/09-import-host-claude-config.md))。
 
 **箱の中で hook / `statusLine` が失敗する** — 持ち込んだグローバル設定が、ホストにしか
 無いコマンドやパス(`hooks`・`statusLine`・`apiKeyHelper` 等)を参照している可能性が

@@ -72,22 +72,38 @@ else
   echo "  skipped (set SMOKE_NESTED=1 to run; needs the nested-container relaxations)"
 fi
 
-echo "[6/6] the host's global settings are imported (read-only) into the box's settings"
-# claude-box mounts the host's settings.json read-only at the path below and the
-# entrypoint merges it into the box's own settings (design 08). Check the merged
-# result from inside, and that the host's file was not written to.
-SETTINGS_TMP="$(mktemp -d)"
-trap 'rm -rf "$SETTINGS_TMP"' EXIT
-printf '{"model":"opus","permissions":{"allow":["Bash(ls)"]}}\n' > "$SETTINGS_TMP/settings.json"
-merged="$("$ENGINE" run --rm "${FIREWALL_CAPS[@]}" \
-            -v "$SETTINGS_TMP/settings.json:/etc/claude-box/host-settings.json:ro" \
-            "$IMAGE" jq -c . /home/node/.claude/settings.json | tail -n1)"
-case "$merged" in
+echo "[6/6] the host's config is imported (settings merged, CLAUDE.md replaced)"
+# claude-box mounts the host's files read-only at the paths below; the entrypoint
+# merges settings.json into the box's copy and replaces the box's CLAUDE.md with the
+# host's (design 08 / 09). A throwaway volume stands in for claude-box-config, so the
+# "replaces what was already there" half is actually exercised.
+HOSTCFG_TMP="$(mktemp -d)"
+SMOKE_VOLUME="claude-box-smoke-config"
+cleanup_smoke() { rm -rf "$HOSTCFG_TMP"; "$ENGINE" volume rm -f "$SMOKE_VOLUME" >/dev/null 2>&1 || true; }
+trap cleanup_smoke EXIT
+printf '{"model":"opus","permissions":{"allow":["Bash(ls)"]}}\n' > "$HOSTCFG_TMP/settings.json"
+printf 'imported from the host\n' > "$HOSTCFG_TMP/CLAUDE.md"
+
+# Seed the volume with state the import has to overwrite.
+"$ENGINE" run --rm "${FIREWALL_CAPS[@]}" -v "$SMOKE_VOLUME:/home/node/.claude" \
+  "$IMAGE" sh -c 'echo stale-in-box-instruction > "$CLAUDE_CONFIG_DIR/CLAUDE.md"' >/dev/null
+
+out="$("$ENGINE" run --rm "${FIREWALL_CAPS[@]}" -v "$SMOKE_VOLUME:/home/node/.claude" \
+         -v "$HOSTCFG_TMP/settings.json:/etc/claude-box/host-settings.json:ro" \
+         -v "$HOSTCFG_TMP/CLAUDE.md:/etc/claude-box/global-CLAUDE.md:ro" \
+         "$IMAGE" sh -c 'jq -c . "$CLAUDE_CONFIG_DIR/settings.json"; cat "$CLAUDE_CONFIG_DIR/CLAUDE.md"')"
+case "$out" in
   *'"model":"opus"'*) pass "host settings merged into the box's settings.json" ;;
-  *) fail "expected the host's keys in the box's settings.json, got '$merged'" ;;
+  *) fail "expected the host's keys in the box's settings.json, got '$out'" ;;
 esac
-[ "$(cat "$SETTINGS_TMP/settings.json")" = '{"model":"opus","permissions":{"allow":["Bash(ls)"]}}' ] \
-  || fail "the host's settings.json was modified from inside the box"
-pass "the host's settings.json is untouched"
+case "$out" in
+  *stale-in-box-instruction*) fail "the box's old CLAUDE.md survived the import" ;;
+  *"imported from the host"*) pass "host CLAUDE.md replaced the box's copy" ;;
+  *) fail "expected the host's CLAUDE.md in the box, got '$out'" ;;
+esac
+[ "$(cat "$HOSTCFG_TMP/settings.json")" = '{"model":"opus","permissions":{"allow":["Bash(ls)"]}}' ] \
+  && [ "$(cat "$HOSTCFG_TMP/CLAUDE.md")" = 'imported from the host' ] \
+  || fail "a host file was modified from inside the box"
+pass "the host's files are untouched"
 
 echo "smoke: all checks passed"

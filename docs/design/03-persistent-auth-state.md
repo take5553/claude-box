@@ -1,7 +1,8 @@
 # 03 — Persist auth and state in a dedicated volume
 
 Related: [01 — isolation model](01-isolation-model.md),
-[08 — importing the host's global settings](08-host-global-settings-import.md)
+[08 — importing the host's global settings](08-host-global-settings-import.md),
+[09 — importing the host's Claude config](09-import-host-claude-config.md)
 
 ## Context
 
@@ -19,10 +20,14 @@ with the host Claude's.
 - Mount a **dedicated named volume** (`claude-box-config`), separate from the
   host's `~/.claude`, there (`claude-box`). Auth persists across container
   recreation.
-- The idempotent "append the line if absent" mechanism for the global `CLAUDE.md`
+- ~~The idempotent "append the line if absent" mechanism for the global `CLAUDE.md`
   is kept, but it is **opt-in**: nothing is injected by default. A file supplied
   via `CLAUDE_BOX_GLOBAL_MD` is merged line by line — recreating the volume
-  restores it, and repeated launches never duplicate.
+  restores it, and repeated launches never duplicate.~~
+  **Superseded by [09](09-import-host-claude-config.md)**: the global `CLAUDE.md` is
+  now imported by default (from the host's `~/.claude/CLAUDE.md`, or the file named
+  by `CLAUDE_BOX_GLOBAL_MD`) and **replaces** the box's copy instead of being
+  appended to it, so a rule deleted on the host no longer lingers in the box.
 - The default notification channel (`preferredNotifChannel`) is written **only
   when the key is unset**, so a manual change is not overwritten.
 - The host's global `settings.json` / `settings.local.json` are the one exception to

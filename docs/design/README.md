@@ -23,3 +23,4 @@ is large enough to stand on its own).
 | [06](06-bake-tools-at-build-time.md) | Bake dev tools in at build time |
 | [07](07-env-request-file-drop.md) | env-request as a local file drop (optional) |
 | [08](08-host-global-settings-import.md) | Import the host's global settings one-way (read-only → merge) |
+| [09](09-import-host-claude-config.md) | Import the host's Claude config by default (skills, instructions, agents, commands) |

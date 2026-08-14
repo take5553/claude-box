@@ -44,12 +44,44 @@ if [ -z "${CLAUDE_BOX_NO_GITCONFIG:-}" ] && [ -f "$HOME/.gitconfig" ]; then
   GITCONFIG_MOUNT=(-v "$HOME/.gitconfig:/home/node/.gitconfig:ro")
 fi
 
-# Bring in your own skills (read-write / Claude can edit and generate them).
-# Not mounted by default. Enabled only when CLAUDE_SKILLS_DIR is set
-# (minimal-mount principle = design 01).
+# ---------------------------------------------------------------------------
+# Import the host's own Claude Code config (design 08 / 09)
+#
+# A box should behave like the claude you already configured, so the host's
+# ~/.claude is brought in **by default** -- settings, skills, global CLAUDE.md,
+# agents, commands. Only those; never the whole directory (credentials, history and
+# every project's state stay on the host = design 01). The host's config dir follows
+# CLAUDE_CONFIG_DIR, the same way claude does.
+#
+# Each item has its own opt-out, and CLAUDE_BOX_NO_HOST_CONFIG=1 turns the whole
+# family off in one go (a pristine box, e.g. for testing). Files that do not exist
+# on the host are simply not mounted.
+# ---------------------------------------------------------------------------
+HOST_CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+NO_HOST_CONFIG="${CLAUDE_BOX_NO_HOST_CONFIG:-}"
+
+# settings.json / settings.local.json -- read-only, at a dedicated path under
+# /etc/claude-box and never on top of the box's own ~/.claude: entrypoint merges
+# them into the box's copy (host keys win, keys the box set itself survive), so the
+# box stays free to write its own settings.json while the host's file can never be
+# touched from inside. Keeping that direction closed matters: the box runs YOLO, and
+# a writable host settings.json would let it plant hooks that the *host* Claude then
+# executes (design 08).
+SETTINGS_MOUNT=()
+if [ -z "$NO_HOST_CONFIG" ] && [ -z "${CLAUDE_BOX_NO_SETTINGS:-}" ]; then
+  [ -f "$HOST_CLAUDE_DIR/settings.json" ] \
+    && SETTINGS_MOUNT+=(-v "$HOST_CLAUDE_DIR/settings.json:/etc/claude-box/host-settings.json:ro")
+  [ -f "$HOST_CLAUDE_DIR/settings.local.json" ] \
+    && SETTINGS_MOUNT+=(-v "$HOST_CLAUDE_DIR/settings.local.json:/etc/claude-box/host-settings.local.json:ro")
+fi
+
+# skills -- read-write, so Claude can edit and generate skills in the box and keep
+# them. That is a deliberate exception to "the box never writes to the host": the
+# host's Claude loads these same files, so a box running YOLO can leave a skill
+# behind for it (design 09). CLAUDE_SKILLS_DIR still points the mount at another
+# directory (and works even with the import family off); if it is set but missing,
+# stop with an explicit error rather than creating it (guards against typos).
 #   e.g.: CLAUDE_SKILLS_DIR=~/dev/my-skills claude-box
-# If it is set but the directory does not exist, stop with an explicit error
-# rather than creating it (guards against typos).
 SKILLS_MOUNT=()
 if [ -n "${CLAUDE_SKILLS_DIR:-}" ]; then
   if [ -d "$CLAUDE_SKILLS_DIR" ]; then
@@ -58,39 +90,40 @@ if [ -n "${CLAUDE_SKILLS_DIR:-}" ]; then
     echo "claude-box: CLAUDE_SKILLS_DIR=$CLAUDE_SKILLS_DIR does not exist as a directory" >&2
     exit 1
   fi
+elif [ -z "$NO_HOST_CONFIG" ] && [ -z "${CLAUDE_BOX_NO_SKILLS:-}" ] && [ -d "$HOST_CLAUDE_DIR/skills" ]; then
+  SKILLS_MOUNT=(-v "$HOST_CLAUDE_DIR/skills:/home/node/.claude/skills")
 fi
 
-# Optional: an instructions file appended to the container's global CLAUDE.md
-# (nothing is injected by default). Only when CLAUDE_BOX_GLOBAL_MD is given a file
-# path on the host is it mounted read-only, and entrypoint appends it idempotently
-# (restored even when the volume is recreated). The default is "do nothing" so that
-# personal preferences are not injected into someone else's box without consent.
+# agents / commands -- read-only. Your subagent definitions and slash commands work
+# in the box, but the box cannot write into the directories the host's Claude reads
+# (unlike skills above; creating one *inside* the box therefore fails).
+EXTRA_CONFIG_MOUNTS=()
+if [ -z "$NO_HOST_CONFIG" ] && [ -z "${CLAUDE_BOX_NO_AGENTS:-}" ] && [ -d "$HOST_CLAUDE_DIR/agents" ]; then
+  EXTRA_CONFIG_MOUNTS+=(-v "$HOST_CLAUDE_DIR/agents:/home/node/.claude/agents:ro")
+fi
+if [ -z "$NO_HOST_CONFIG" ] && [ -z "${CLAUDE_BOX_NO_COMMANDS:-}" ] && [ -d "$HOST_CLAUDE_DIR/commands" ]; then
+  EXTRA_CONFIG_MOUNTS+=(-v "$HOST_CLAUDE_DIR/commands:/home/node/.claude/commands:ro")
+fi
+
+# Global CLAUDE.md -- mounted read-only, and entrypoint *replaces* the box's copy
+# with it on every launch, so the box's instructions are exactly what the host says
+# (deleting a line on the host deletes it in the box too; anything written to the
+# box's CLAUDE.md from inside does not survive the next launch -- design 09).
+# CLAUDE_BOX_GLOBAL_MD overrides the source file, and still works with the import
+# family off; a path that does not exist is a warning, not a failure.
 GLOBAL_MD_MOUNT=()
+GLOBAL_MD_FILE=""
 if [ -n "${CLAUDE_BOX_GLOBAL_MD:-}" ]; then
   if [ -f "$CLAUDE_BOX_GLOBAL_MD" ]; then
-    GLOBAL_MD_MOUNT=(-v "$CLAUDE_BOX_GLOBAL_MD:/etc/claude-box/global-CLAUDE.md:ro")
+    GLOBAL_MD_FILE="$CLAUDE_BOX_GLOBAL_MD"
   else
     echo "claude-box: CLAUDE_BOX_GLOBAL_MD=$CLAUDE_BOX_GLOBAL_MD not found (skipping injection)" >&2
   fi
+elif [ -z "$NO_HOST_CONFIG" ] && [ -z "${CLAUDE_BOX_NO_GLOBAL_MD:-}" ] && [ -f "$HOST_CLAUDE_DIR/CLAUDE.md" ]; then
+  GLOBAL_MD_FILE="$HOST_CLAUDE_DIR/CLAUDE.md"
 fi
-
-# Bring in the host's *global* Claude Code settings (on by default; opt out with
-# CLAUDE_BOX_NO_SETTINGS=1). Only the two files are mounted -- read-only, and at a
-# dedicated path under /etc/claude-box, never on top of the box's own ~/.claude.
-# entrypoint merges them into the box's settings (host keys win, keys the box set
-# itself survive), so the box stays free to write its own settings.json while the
-# host's file can never be touched from inside. Keeping that direction closed
-# matters: the box runs YOLO, and a writable host settings.json would let it plant
-# hooks that the *host* Claude then executes (design 08).
-# The host's config dir follows CLAUDE_CONFIG_DIR, the same way claude does.
-SETTINGS_MOUNT=()
-if [ -z "${CLAUDE_BOX_NO_SETTINGS:-}" ]; then
-  HOST_CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-  [ -f "$HOST_CLAUDE_DIR/settings.json" ] \
-    && SETTINGS_MOUNT+=(-v "$HOST_CLAUDE_DIR/settings.json:/etc/claude-box/host-settings.json:ro")
-  [ -f "$HOST_CLAUDE_DIR/settings.local.json" ] \
-    && SETTINGS_MOUNT+=(-v "$HOST_CLAUDE_DIR/settings.local.json:/etc/claude-box/host-settings.local.json:ro")
-fi
+[ -n "$GLOBAL_MD_FILE" ] \
+  && GLOBAL_MD_MOUNT=(-v "$GLOBAL_MD_FILE:/etc/claude-box/global-CLAUDE.md:ro")
 
 # Only when you want to allow GitHub operations (push / PR / issue / merge),
 # pass a scope-limited, short-lived token *at runtime only* (never stored).
@@ -206,6 +239,7 @@ TTY_FLAGS=(-it)
   "${SKILLS_MOUNT[@]}" \
   "${GLOBAL_MD_MOUNT[@]}" \
   "${SETTINGS_MOUNT[@]}" \
+  "${EXTRA_CONFIG_MOUNTS[@]}" \
   "${GITCONFIG_MOUNT[@]}" \
   "${GH_ENV[@]}" \
   "${REQUEST_DIR_MOUNT[@]}" \
