@@ -31,6 +31,12 @@ boundaries before relying on it.
 - **A `GH_TOKEN` you pass in is fully usable by the in-box Claude.** Anything that
   token can do, the box can do. Use a narrowly-scoped, short-lived token, never a
   long-lived personal token with broad scope.
+- **Your global Claude Code settings come in with you.** By default the host's
+  `~/.claude/settings.json` / `settings.local.json` are mounted read-only and merged
+  into the box's settings ([08](docs/design/08-host-global-settings-import.md)), so
+  whatever they contain — `hooks`, `env`, `apiKeyHelper` — is readable and runnable
+  *inside* the box. The direction is one-way (the host's files are never written),
+  but if you keep secrets there, they travel. Opt out with `CLAUDE_BOX_NO_SETTINGS=1`.
 - **You can turn the protections off yourself.** `SKIP_FIREWALL=1` disables egress
   filtering entirely (unrestricted outbound), and `ALLOW_DOMAINS` replaces the
   optional allow-list. These are intentional escape hatches; using them is on you.

@@ -74,6 +74,24 @@ if [ -n "${CLAUDE_BOX_GLOBAL_MD:-}" ]; then
   fi
 fi
 
+# Bring in the host's *global* Claude Code settings (on by default; opt out with
+# CLAUDE_BOX_NO_SETTINGS=1). Only the two files are mounted -- read-only, and at a
+# dedicated path under /etc/claude-box, never on top of the box's own ~/.claude.
+# entrypoint merges them into the box's settings (host keys win, keys the box set
+# itself survive), so the box stays free to write its own settings.json while the
+# host's file can never be touched from inside. Keeping that direction closed
+# matters: the box runs YOLO, and a writable host settings.json would let it plant
+# hooks that the *host* Claude then executes (design 08).
+# The host's config dir follows CLAUDE_CONFIG_DIR, the same way claude does.
+SETTINGS_MOUNT=()
+if [ -z "${CLAUDE_BOX_NO_SETTINGS:-}" ]; then
+  HOST_CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+  [ -f "$HOST_CLAUDE_DIR/settings.json" ] \
+    && SETTINGS_MOUNT+=(-v "$HOST_CLAUDE_DIR/settings.json:/etc/claude-box/host-settings.json:ro")
+  [ -f "$HOST_CLAUDE_DIR/settings.local.json" ] \
+    && SETTINGS_MOUNT+=(-v "$HOST_CLAUDE_DIR/settings.local.json:/etc/claude-box/host-settings.local.json:ro")
+fi
+
 # Only when you want to allow GitHub operations (push / PR / issue / merge),
 # pass a scope-limited, short-lived token *at runtime only* (never stored).
 #   GH_TOKEN="$(security find-generic-password -s claude-box-gh -w)" claude-box
@@ -187,6 +205,7 @@ TTY_FLAGS=(-it)
   -v "$CONFIG_VOLUME:/home/node/.claude" \
   "${SKILLS_MOUNT[@]}" \
   "${GLOBAL_MD_MOUNT[@]}" \
+  "${SETTINGS_MOUNT[@]}" \
   "${GITCONFIG_MOUNT[@]}" \
   "${GH_ENV[@]}" \
   "${REQUEST_DIR_MOUNT[@]}" \

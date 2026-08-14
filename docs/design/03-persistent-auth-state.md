@@ -1,6 +1,7 @@
 # 03 — Persist auth and state in a dedicated volume
 
-Related: [01 — isolation model](01-isolation-model.md)
+Related: [01 — isolation model](01-isolation-model.md),
+[08 — importing the host's global settings](08-host-global-settings-import.md)
 
 ## Context
 
@@ -24,6 +25,10 @@ with the host Claude's.
   restores it, and repeated launches never duplicate.
 - The default notification channel (`preferredNotifChannel`) is written **only
   when the key is unset**, so a manual change is not overwritten.
+- The host's global `settings.json` / `settings.local.json` are the one exception to
+  "nothing from the host's `~/.claude`": they are imported **one-way** — mounted
+  read-only and merged into the box's own settings on every launch
+  ([08](08-host-global-settings-import.md)).
 
 ## Consequences
 
@@ -31,7 +36,7 @@ with the host Claude's.
 
 - Even with disposable containers, you log in once.
 - State is physically separated from the host; box settings do not leak into the
-  host Claude.
+  host Claude (the settings import is read-only and host → box only).
 - Idempotent init is safe to re-run (tolerant of re-execution).
 
 ### Trade-offs and notes

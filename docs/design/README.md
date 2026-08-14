@@ -22,3 +22,4 @@ is large enough to stand on its own).
 | [05](05-nested-containers-rootless-podman.md) | Nested containers via rootless Podman (no DinD) |
 | [06](06-bake-tools-at-build-time.md) | Bake dev tools in at build time |
 | [07](07-env-request-file-drop.md) | env-request as a local file drop (optional) |
+| [08](08-host-global-settings-import.md) | Import the host's global settings one-way (read-only → merge) |

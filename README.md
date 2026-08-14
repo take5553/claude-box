@@ -22,6 +22,8 @@ keeping the blast radius inside the box: two walls — **file isolation** and a
   force-redirected through a local proxy that allows only a whitelist by TLS SNI /
   HTTP Host. TLS is **not** decrypted.
 - Auth and settings persist in a dedicated volume, kept separate from the host's.
+  Your global `settings.json` / `settings.local.json` are imported **one-way**
+  (mounted read-only, merged in at startup — the host's copy is never written).
 
 **Deliberately closed** (the point, not an oversight)
 
@@ -121,6 +123,7 @@ Inside the box, typing `claude` launches it in YOLO mode; management subcommands
 | `CLAUDE_BOX_IMAGE` | Image to run. Default `claude-box:latest`. |
 | `CLAUDE_BOX_NESTED_CONTAINERS=1` | Enable in-container rootless Podman (adds relaxations). **Off by default** — see [Security model](#security-model). |
 | `CLAUDE_BOX_NO_GITCONFIG=1` | Do not mount `~/.gitconfig` (avoids host-specific settings breaking git). |
+| `CLAUDE_BOX_NO_SETTINGS=1` | Do not import the host's global `settings.json` / `settings.local.json` (imported by default). |
 | `CLAUDE_BOX_REQUEST_DIR` | Host folder for the env-request outbox. **On by default** (`~/.claude-box/requests`); set this to relocate it. |
 | `CLAUDE_BOX_NO_REQUEST_DIR=1` | Turn off the env-request outbox (on by default). |
 | `EXTRA_ALLOW_DOMAINS` | **Add** egress destinations (core always included; space-separated). |
@@ -136,6 +139,7 @@ Only these host resources enter the box. **The home directory is not mounted.**
 | Current project | **same absolute path as the host** (e.g. `/home/you/project`) | always, read-write. Claude Code keys its history on the current path, so a fixed `/workspace` would blend every project's history. **The matching path is why — the home directory is not mounted.** |
 | Auth/settings volume | `/home/node/.claude` | always. A dedicated volume, **separate** from the host's `~/.claude`. |
 | `~/.gitconfig` | `/home/node/.gitconfig` (ro) | only if the file exists. Disable with `CLAUDE_BOX_NO_GITCONFIG=1`. |
+| Global `settings.json` / `settings.local.json` | `/etc/claude-box/host-settings*.json` (ro), merged into `/home/node/.claude/` | **default on**, only for files that exist. Read-only + merged, so the host's copy is never written ([design 08](docs/design/08-host-global-settings-import.md)). Disable with `CLAUDE_BOX_NO_SETTINGS=1`. |
 | Your skills | `/home/node/.claude/skills` | only if `CLAUDE_SKILLS_DIR` is set (read-write). |
 | Global `CLAUDE.md` addendum | (idempotent append) | only if `CLAUDE_BOX_GLOBAL_MD` is set. |
 | Containers volume | `/home/node/.local/share/containers` | only if `CLAUDE_BOX_NESTED_CONTAINERS=1`. |
@@ -197,6 +201,13 @@ enable with `CLAUDE_BOX_NESTED_CONTAINERS=1` (and `WITH_PODMAN` must be baked in
 `docker pull` works but `docker run` fails with `Invalid argument`, the containers
 volume is missing — see [design 05](docs/design/05-nested-containers-rootless-podman.md).
 On a Linux host with AppArmor, also add `--security-opt apparmor=unconfined`.
+
+**A hook / `statusLine` fails inside the box** — the imported global settings may
+point at commands or paths that exist only on the host (`hooks`, `statusLine`,
+`apiKeyHelper`). Turn the import off with `CLAUDE_BOX_NO_SETTINGS=1`, or move the
+host-specific entries out of the global `settings.json`. Note that a merged key is
+not removed by deleting it on the host — edit it inside the box, or recreate the
+`claude-box-config` volume ([design 08](docs/design/08-host-global-settings-import.md)).
 
 **git fails inside the box** — the mounted `~/.gitconfig` may reference things the
 container cannot resolve (`includeIf`, signing-key paths,

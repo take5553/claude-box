@@ -32,9 +32,12 @@ Launch the container with least privilege (the `claude-box` script).
   from `$HOME` or `/` is explicitly refused so nothing broad is exposed by
   accident.
 - **Bring in as little as possible**: `~/.gitconfig` read-only (opt-out with
-  `CLAUDE_BOX_NO_GITCONFIG`); an optional personal skills directory read-write
-  (`CLAUDE_SKILLS_DIR`, off by default). A GitHub token (`GH_TOKEN`) is never
-  stored — it is passed as an environment variable *only at runtime*.
+  `CLAUDE_BOX_NO_GITCONFIG`); the host's global `settings.json` /
+  `settings.local.json` read-only, merged into the box's own settings (opt-out with
+  `CLAUDE_BOX_NO_SETTINGS`, [08](08-host-global-settings-import.md)); an optional
+  personal skills directory read-write (`CLAUDE_SKILLS_DIR`, off by default). A
+  GitHub token (`GH_TOKEN`) is never stored — it is passed as an environment
+  variable *only at runtime*.
 
 ## Consequences
 

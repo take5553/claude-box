@@ -19,7 +19,9 @@
   からの起動は拒否する。
 - **egress は既定拒否・ホスト名で判定**。80/443 は透過リダイレクトでローカルプロキシへ
   強制的に通し、TLS の SNI / HTTP の Host のホワイトリストだけを許可する。TLS は復号しない。
-- 認証・設定は専用ボリュームに永続化し、ホスト側とは分離する。
+- 認証・設定は専用ボリュームに永続化し、ホスト側とは分離する。ホストのグローバル
+  `settings.json` / `settings.local.json` だけは**片方向**で持ち込む(ro マウント →
+  起動時にマージ。ホスト側のファイルには一切書き戻さない)。
 
 **意図的に開けていないもの**(見落としではなく、これが要点)
 
@@ -117,6 +119,7 @@ claude-box claude     # 直接 claude を起動する場合
 | `CLAUDE_BOX_IMAGE` | 使用するイメージ。既定 `claude-box:latest` |
 | `CLAUDE_BOX_NESTED_CONTAINERS=1` | コンテナ内 rootless Podman を有効化(緩和を付与)。**既定 off**(→ セキュリティモデル節) |
 | `CLAUDE_BOX_NO_GITCONFIG=1` | `~/.gitconfig` のマウントを無効化(壊れやすい設定の回避) |
+| `CLAUDE_BOX_NO_SETTINGS=1` | ホストのグローバル `settings.json` / `settings.local.json` の持ち込みを無効化(既定 on) |
 | `CLAUDE_BOX_REQUEST_DIR` | env-request の outbox にするホストフォルダ。**既定 on**(`~/.claude-box/requests`)。置き場を変えたいとき指定 |
 | `CLAUDE_BOX_NO_REQUEST_DIR=1` | env-request の outbox を無効化(既定 on) |
 | `EXTRA_ALLOW_DOMAINS` | egress 許可先を**追加**する(コアは常に含む。スペース区切り) |
@@ -132,6 +135,7 @@ claude-box claude     # 直接 claude を起動する場合
 | カレントプロジェクト | **ホストと同じ絶対パス**(例 `/home/you/project`) | 常時・読み書き。Claude Code はカレントパスをキーに履歴を保存するため、固定 `/workspace` だと全プロジェクトの履歴が混ざる。**同じパスに見えるのはこのためで、ホームがマウントされているわけではない** |
 | 認証・設定ボリューム | `/home/node/.claude` | 常時。ホストの `~/.claude` とは**別**の専用ボリューム |
 | `~/.gitconfig` | `/home/node/.gitconfig`(ro) | ファイルが在るときだけ。`CLAUDE_BOX_NO_GITCONFIG=1` で無効化 |
+| グローバル `settings.json` / `settings.local.json` | `/etc/claude-box/host-settings*.json`(ro)→ `/home/node/.claude/` へマージ | **既定 on**・在るファイルだけ。ro マウント＋マージなのでホスト側は書き換わらない([design 08](docs/design/08-host-global-settings-import.md))。`CLAUDE_BOX_NO_SETTINGS=1` で無効化 |
 | 自作スキル | `/home/node/.claude/skills` | `CLAUDE_SKILLS_DIR` 指定時のみ・読み書き |
 | グローバル `CLAUDE.md` 追記ファイル | (冪等追記) | `CLAUDE_BOX_GLOBAL_MD` 指定時のみ |
 | コンテナ用ボリューム | `/home/node/.local/share/containers` | `CLAUDE_BOX_NESTED_CONTAINERS=1` のときだけ |
@@ -190,6 +194,13 @@ grep 'allowed=0'   /var/log/egress-proxy/http.log   # 平文 HTTP(80)
 いること)。`docker pull` は通るのに `docker run` が `Invalid argument` で失敗する
 場合は containers ボリュームが無い([design 05](docs/design/05-nested-containers-rootless-podman.md))。
 Linux ホストで AppArmor が有効なら `--security-opt apparmor=unconfined` も足す。
+
+**箱の中で hook / `statusLine` が失敗する** — 持ち込んだグローバル設定が、ホストにしか
+無いコマンドやパス(`hooks`・`statusLine`・`apiKeyHelper` 等)を参照している可能性が
+ある。`CLAUDE_BOX_NO_SETTINGS=1` で持ち込みを切るか、ホスト固有の項目をグローバルの
+`settings.json` から外す。なお**ホスト側でキーを消しても箱からは消えない**(マージは
+追加・上書きのみ)。箱の中で編集するか、`claude-box-config` ボリュームを作り直す
+([design 08](docs/design/08-host-global-settings-import.md))。
 
 **箱の中で git が失敗する** — マウントした `~/.gitconfig` が、コンテナ内で解決できない
 設定(`includeIf`・署名鍵のパス・`credential.helper=osxkeychain` 等)を参照している
