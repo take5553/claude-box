@@ -172,32 +172,39 @@ claude-box claude     # 直接 claude を起動する場合
 
 ```sh
 # ---- claude-box -----------------------------------------------------------
-export CLAUDE_BOX_IMAGE=claude-box:latest    # 自分でビルドしたタグ
-export CLAUDE_BOX_NESTED_CONTAINERS=1        # 箱の中で docker/compose を使うときだけ
+# 変数はシェルに export せず、すべてラッパーの中に置く。`command` は PATH 上の
+# 本体を呼ぶので同名の関数でも再帰しない。`local -x` なので関数を抜ければ消える。
+claude-box() {
+  local -x CLAUDE_BOX_IMAGE="${CLAUDE_BOX_IMAGE:-claude-box:latest}"
 
-# ~/.claude は既定で読み書き共有。箱から一切書き戻させたくないなら外す
-# (上の「ホストの ~/.claude は箱に入る」節を参照)
-# export CLAUDE_BOX_HOST_CONFIG=ro
+  # 箱の中で docker / compose を使うときだけ(サンドボックスの緩和が付く)
+  # local -x CLAUDE_BOX_NESTED_CONTAINERS="${CLAUDE_BOX_NESTED_CONTAINERS:-1}"
 
-# スキルを ~/.claude/skills ではなく専用リポジトリで持っている場合
-# export CLAUDE_SKILLS_DIR="$HOME/dev/my-skills"
+  # ~/.claude は既定で読み書き共有。箱から一切書き戻させたくないなら外す
+  # (上の「ホストの ~/.claude は箱に入る」節を参照)
+  # local -x CLAUDE_BOX_HOST_CONFIG="${CLAUDE_BOX_HOST_CONFIG:-ro}"
 
-# 常に開けておきたい egress 先(コアの許可リストは常に維持される)
-# export EXTRA_ALLOW_DOMAINS="pypi.org files.pythonhosted.org"
+  # スキルを ~/.claude/skills ではなく専用リポジトリで持っている場合
+  # local -x CLAUDE_SKILLS_DIR="${CLAUDE_SKILLS_DIR:-$HOME/dev/my-skills}"
 
-# GitHub トークンは push / PR をさせたいときだけ。起動時に Keychain から取り、
-# 箱には保存しない(Linux なら `secret-tool lookup …` 等)
-cbox-gh() {
-  GH_TOKEN="$(security find-generic-password -s claude-box-gh -w)" claude-box "$@"
+  # 常に開けておきたい egress 先(コアの許可リストは常に維持される)
+  # local -x EXTRA_ALLOW_DOMAINS="${EXTRA_ALLOW_DOMAINS:-pypi.org files.pythonhosted.org}"
+
+  # `claude-box --gh …` のときだけ Keychain の GitHub トークンを*その実行に*渡す。
+  # 素の `claude-box` は決して持たない(Linux なら `secret-tool lookup …` 等)
+  if [ "${1:-}" = --gh ]; then
+    shift
+    local -x GH_TOKEN="$(security find-generic-password -s claude-box-gh -w)"
+  fi
+
+  command claude-box "$@"
 }
-
-# 設定は引き継ぐが書き戻さない箱(他人のリポジトリを触るとき用)
-alias cbox-ro='CLAUDE_BOX_HOST_CONFIG=ro claude-box'
 # ---------------------------------------------------------------------------
 ```
 
-`GH_TOKEN` は `export` しないこと。export するとすべての箱(とシェル上の他のすべて)に
-トークンが渡る。上のように起動を包めば、必要な実行だけに絞れる。
+各変数を `${VAR:-既定値}` で書いてあるので、単発の `CLAUDE_BOX_HOST_CONFIG=ro
+claude-box` はラッパーの値より優先される。とくに `GH_TOKEN` はここに置くのが重要で、
+`export` するとすべての箱(とシェル上の他のすべて)にトークンが渡ってしまう。
 
 ### コンテナへ持ち込まれるもの(マウント)
 

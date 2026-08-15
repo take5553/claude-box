@@ -180,33 +180,41 @@ from:
 
 ```sh
 # ---- claude-box -----------------------------------------------------------
-export CLAUDE_BOX_IMAGE=claude-box:latest    # the tag you build locally
-export CLAUDE_BOX_NESTED_CONTAINERS=1        # only if you run docker/compose inside
+# Keep every variable inside the wrapper rather than exporting it into your shell.
+# `command` runs the real launcher on PATH, so the function can carry the same name
+# without recursing, and `local -x` un-sets each variable again when it returns.
+claude-box() {
+  local -x CLAUDE_BOX_IMAGE="${CLAUDE_BOX_IMAGE:-claude-box:latest}"
 
-# Your ~/.claude is shared read-write by default. Uncomment to keep a box from
-# writing any of it back (see the import section above).
-# export CLAUDE_BOX_HOST_CONFIG=ro
+  # Only if you run docker / compose inside the box (adds sandbox relaxations)
+  # local -x CLAUDE_BOX_NESTED_CONTAINERS="${CLAUDE_BOX_NESTED_CONTAINERS:-1}"
 
-# Skills kept in their own repo rather than in ~/.claude/skills
-# export CLAUDE_SKILLS_DIR="$HOME/dev/my-skills"
+  # Your ~/.claude is shared read-write by default. Uncomment to keep a box from
+  # writing any of it back (see the import section above).
+  # local -x CLAUDE_BOX_HOST_CONFIG="${CLAUDE_BOX_HOST_CONFIG:-ro}"
 
-# Egress destinations you always want (core list is kept regardless)
-# export EXTRA_ALLOW_DOMAINS="pypi.org files.pythonhosted.org"
+  # Skills kept in their own repo rather than in ~/.claude/skills
+  # local -x CLAUDE_SKILLS_DIR="${CLAUDE_SKILLS_DIR:-$HOME/dev/my-skills}"
 
-# GitHub token only when you actually want the box to push / open PRs, pulled from
-# the Keychain at launch and never stored in the box. (Linux: `secret-tool lookup …`)
-cbox-gh() {
-  GH_TOKEN="$(security find-generic-password -s claude-box-gh -w)" claude-box "$@"
+  # Egress destinations you always want (the core list is kept regardless)
+  # local -x EXTRA_ALLOW_DOMAINS="${EXTRA_ALLOW_DOMAINS:-pypi.org files.pythonhosted.org}"
+
+  # `claude-box --gh …` hands *this run* a GitHub token from the Keychain, so a plain
+  # `claude-box` never has one. (Linux: `secret-tool lookup …`)
+  if [ "${1:-}" = --gh ]; then
+    shift
+    local -x GH_TOKEN="$(security find-generic-password -s claude-box-gh -w)"
+  fi
+
+  command claude-box "$@"
 }
-
-# A box that inherits your config but cannot write back — handy for someone else's repo
-alias cbox-ro='CLAUDE_BOX_HOST_CONFIG=ro claude-box'
 # ---------------------------------------------------------------------------
 ```
 
-Keep `GH_TOKEN` out of `export`: exporting it hands the token to *every* box (and to
-everything else in your shell). Wrapping the launch, as above, scopes it to the runs
-that need it.
+Each variable is written as `${VAR:-default}`, so a one-off `CLAUDE_BOX_HOST_CONFIG=ro
+claude-box` still wins over the wrapper's value. `GH_TOKEN` in particular is worth
+keeping in here rather than in an `export`: exported, it would be handed to *every*
+box — and to everything else in your shell.
 
 ### What is mounted
 
