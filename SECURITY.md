@@ -32,17 +32,18 @@ boundaries before relying on it.
   token can do, the box can do. Use a narrowly-scoped, short-lived token, never a
   long-lived personal token with broad scope.
 - **Your Claude Code config comes in with you.** By default the host's `~/.claude`
-  settings, global `CLAUDE.md`, `skills/`, `agents/` and `commands/` are applied
-  inside the box ([08](docs/design/08-host-global-settings-import.md),
+  settings, global `CLAUDE.md`, `skills/`, `agents/`, `commands/` and `plugins/`
+  are applied inside the box ([08](docs/design/08-host-global-settings-import.md),
   [09](docs/design/09-import-host-claude-config.md),
   [10](docs/design/10-host-config-import-modes.md)), so whatever they contain —
   `hooks`, `env`, `apiKeyHelper` — is readable and runnable *inside* the box. If you
   keep secrets there, they travel.
 - **By default the box can also write that config back to the host.** `settings.json`,
-  `settings.local.json`, `skills/`, `agents/` and `commands/` are **shared
-  read-write**: it is how a skill or a setting produced in the box persists. But the
-  box runs YOLO, and your *host's* Claude Code loads those same files afterwards — a
-  hook added to `settings.json` or a skill left in `skills/` runs on your host later.
+  `settings.local.json`, `skills/`, `agents/`, `commands/`, `plugins/` and the global
+  `CLAUDE.md` are **shared read-write**: it is how a skill, a plugin or a setting
+  produced in the box persists. But the box runs YOLO, and your *host's* Claude Code
+  loads those same files afterwards — a hook added to `settings.json`, or a skill left
+  in `skills/`, runs on your host later.
   This is the one place the box's blast radius reaches the host, and it is a choice:
   `CLAUDE_BOX_HOST_CONFIG=ro` brings the config in while blocking every write back,
   `=off` brings nothing, and per-item variables (`CLAUDE_BOX_SETTINGS=ro`, …) do the

@@ -41,17 +41,26 @@ Give every imported item the same three-valued **mode**:
 | `skills/` | `CLAUDE_BOX_SKILLS` | `rw` |
 | `agents/` | `CLAUDE_BOX_AGENTS` | `rw` |
 | `commands/` | `CLAUDE_BOX_COMMANDS` | `rw` |
-| `CLAUDE.md` | `CLAUDE_BOX_GLOBAL_MD_MODE` | `ro` |
+| `plugins/` | `CLAUDE_BOX_PLUGINS` | `rw` |
+| `CLAUDE.md` | `CLAUDE_BOX_GLOBAL_MD_MODE` | `rw` |
 
 - `CLAUDE_BOX_HOST_CONFIG` sets the mode for **every** item at once, and the per-item
   variables override it. The two useful global settings are `off` (a pristine box —
   what the box did before [08](08-host-global-settings-import.md)) and **`ro`**,
   which is the point of having a mode at all: bring the whole config in, and let
   nothing the box does reach the host.
-- **`rw` is the default** for everything except `CLAUDE.md`, which stays `ro` so the
-  box's instructions keep tracking the host's file without the box being able to
-  rewrite your house rules ([09](09-import-host-claude-config.md)); `rw` is available
-  when you want `#`-shortcut memories to land on the host.
+- **`rw` is the default for every item, `CLAUDE.md` included.** An earlier draft kept
+  `CLAUDE.md` on `ro` as a safeguard against the box rewriting its own house rules,
+  but a single rule with a single exception is harder to hold in your head than a
+  single rule — and the exception bought little, since `settings.json` (shared `rw`)
+  can carry hooks that do far more than an instruction line. One default, one
+  variable per item, documented where people actually look (a dedicated section in
+  both READMEs rather than a row in a table), is the safer arrangement in practice.
+  On `rw`, `#`-shortcut memories written in the box land on the host as well.
+- **`plugins/` is imported too**, and not only for symmetry: which plugins are
+  enabled is recorded in `settings.json`, which is already shared, so leaving
+  `~/.claude/plugins` behind would tell the box to enable plugins whose marketplaces
+  it does not have.
 - `CLAUDE_SKILLS_DIR` and `CLAUDE_BOX_GLOBAL_MD` still name a **source**; being
   explicit, they survive `CLAUDE_BOX_HOST_CONFIG=off`, while the per-item mode
   variable still applies to them.
@@ -88,9 +97,9 @@ drops that fallback.
   It is a deliberate trade — the box is the same person's Claude, and a box whose
   configuration work is thrown away every time is the friction this repo exists to
   remove — but it is the one place where the box's blast radius reaches the host, and
-  it is chosen, not inherited. `CLAUDE_BOX_HOST_CONFIG=ro` closes it in one flag;
-  `CLAUDE.md` stays `ro` by default as the smallest safeguard that keeps the box from
-  rewriting its own instructions on the host.
+  it is chosen, not inherited. `CLAUDE_BOX_HOST_CONFIG=ro` closes it in one flag, and
+  because the default is the permissive one, both READMEs carry a dedicated section
+  that says so in as many words rather than a table row.
 - **Review what comes back.** Keeping `~/.claude` under git (or simply diffing it) is
   the cheap habit that makes the write direction visible; it is the same discipline
   as reviewing the project diff after a YOLO session.
@@ -102,3 +111,13 @@ drops that fallback.
   create the directory (or point `CLAUDE_SKILLS_DIR` somewhere) first.
 - **A mounted directory still shadows the volume's copy** at that path
   ([09](09-import-host-claude-config.md)).
+- **Plugins record absolute install paths.** `plugins/known_marketplaces.json` stores
+  each marketplace's `installLocation`, and the same directory is
+  `/Users/you/.claude/plugins/…` on the host and `/home/node/.claude/plugins/…` in
+  the box. Claude Code detects a location outside its own plugins directory and
+  rewrites the entry, so each side repairs the file at startup and the plugins
+  themselves work — at the cost of that one file changing back and forth.
+  `CLAUDE_BOX_PLUGINS=off` avoids the churn.
+- **In-box edits to `CLAUDE.md` now reach the host** (`#`-shortcut memories included).
+  That is the point of `rw`, but it also means a box can rewrite your house rules —
+  `CLAUDE_BOX_GLOBAL_MD_MODE=ro` keeps the old replace-from-the-host behaviour.

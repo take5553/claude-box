@@ -23,8 +23,8 @@ keeping the blast radius inside the box: two walls — **file isolation** and a
   HTTP Host. TLS is **not** decrypted.
 - Credentials and history persist in a dedicated volume, kept separate from the
   host's. Named items of your `~/.claude` — settings, `skills/`, `agents/`,
-  `commands/` and the global `CLAUDE.md` — are imported so a box behaves like the
-  Claude you configured, **shared read-write by default**;
+  `commands/`, `plugins/` and the global `CLAUDE.md` — are imported so a box behaves
+  like the Claude you configured, **shared read-write by default**;
   `CLAUDE_BOX_HOST_CONFIG=ro` (or `off`) keeps the box from writing any of it back
   ([design 10](docs/design/10-host-config-import-modes.md)).
 
@@ -115,6 +115,42 @@ claude-box claude     # launch claude directly
 Inside the box, typing `claude` launches it in YOLO mode; management subcommands
 (`login` / `update` / `mcp`, etc.) pass through without the flag.
 
+### Your `~/.claude` comes into the box — and is shared, not copied
+
+So that a box behaves like the Claude you already configured, these items are taken
+from the host's `~/.claude` (`CLAUDE_CONFIG_DIR` if you set one) and, **by default,
+shared read-write**:
+
+| Item | Variable | Default |
+|---|---|---|
+| `settings.json`, `settings.local.json` | `CLAUDE_BOX_SETTINGS` | `rw` |
+| `skills/` | `CLAUDE_BOX_SKILLS` | `rw` |
+| `agents/` | `CLAUDE_BOX_AGENTS` | `rw` |
+| `commands/` | `CLAUDE_BOX_COMMANDS` | `rw` |
+| `plugins/` (installed plugins and marketplaces) | `CLAUDE_BOX_PLUGINS` | `rw` |
+| `CLAUDE.md` | `CLAUDE_BOX_GLOBAL_MD_MODE` | `rw` |
+
+Each variable takes `rw` (share it), `ro` (bring it in, but the box cannot write to
+it) or `off` (do not bring it in). `CLAUDE_BOX_HOST_CONFIG` sets all of them at once.
+
+> [!IMPORTANT]
+> **`rw` means the box writes to your host's files.** That is what makes a skill or a
+> setting produced in the box stick — but the box runs YOLO, and your host's Claude
+> Code loads those same files afterwards: a hook added to `settings.json`, or a
+> skill left in `skills/`, runs **on your host** later. This is the one place the
+> box's blast radius reaches the host.
+>
+> - `CLAUDE_BOX_HOST_CONFIG=ro` — inherit all of it, write none of it back.
+> - `CLAUDE_BOX_HOST_CONFIG=off` — a pristine box, nothing imported.
+> - Or per item: `CLAUDE_BOX_SETTINGS=ro`, `CLAUDE_BOX_SKILLS=off`, …
+>
+> Keeping `~/.claude` under version control (or diffing it after a session) is the
+> cheap way to see what came back.
+
+Only paths that already exist on the host are mounted, and nothing is created there.
+**Credentials, history and session state are not shared** — they stay in the box's own
+volume. The reasoning is in [design 10](docs/design/10-host-config-import-modes.md).
+
 ### Environment variables
 
 | Variable | Effect |
@@ -126,10 +162,10 @@ Inside the box, typing `claude` launches it in YOLO mode; management subcommands
 | `CLAUDE_BOX_IMAGE` | Image to run. Default `claude-box:latest`. |
 | `CLAUDE_BOX_NESTED_CONTAINERS=1` | Enable in-container rootless Podman (adds relaxations). **Off by default** — see [Security model](#security-model). |
 | `CLAUDE_BOX_NO_GITCONFIG=1` | Do not mount `~/.gitconfig` (avoids host-specific settings breaking git). |
-| `CLAUDE_BOX_HOST_CONFIG` | Import mode for **everything** from the host's `~/.claude`: `rw` / `ro` / `off`. `off` = a pristine box; `ro` = bring it all in, but the box can never write back. Per-item variables below override it. |
-| `CLAUDE_BOX_SETTINGS` | Mode for `settings.json` / `settings.local.json`. Default `rw` (shared with the host); `ro` merges them into the box's own copy instead. |
-| `CLAUDE_BOX_SKILLS` / `CLAUDE_BOX_AGENTS` / `CLAUDE_BOX_COMMANDS` | Mode for `~/.claude/skills` / `agents` / `commands`. Default `rw`. |
-| `CLAUDE_BOX_GLOBAL_MD_MODE` | Mode for the global `CLAUDE.md`. Default `ro` (the host's file replaces the box's copy at startup); `rw` shares the file, so `#` memories written in the box land on the host. |
+| `CLAUDE_BOX_HOST_CONFIG` | Import mode for **everything** from the host's `~/.claude`: `rw` / `ro` / `off` (see [above](#your-claude-comes-into-the-box--and-is-shared-not-copied)). Per-item variables override it. |
+| `CLAUDE_BOX_SETTINGS` | Mode for `settings.json` / `settings.local.json`. Default `rw`; `ro` merges them into the box's own copy instead. |
+| `CLAUDE_BOX_SKILLS` / `CLAUDE_BOX_AGENTS` / `CLAUDE_BOX_COMMANDS` / `CLAUDE_BOX_PLUGINS` | Mode for `~/.claude/skills` / `agents` / `commands` / `plugins`. Default `rw`. |
+| `CLAUDE_BOX_GLOBAL_MD_MODE` | Mode for the global `CLAUDE.md`. Default `rw`; `ro` replaces the box's copy with the host's file at startup instead of sharing it. |
 | `CLAUDE_BOX_REQUEST_DIR` | Host folder for the env-request outbox. **On by default** (`~/.claude-box/requests`); set this to relocate it. |
 | `CLAUDE_BOX_NO_REQUEST_DIR=1` | Turn off the env-request outbox (on by default). |
 | `EXTRA_ALLOW_DOMAINS` | **Add** egress destinations (core always included; space-separated). |
@@ -146,8 +182,8 @@ Only these host resources enter the box. **The home directory is not mounted.**
 | Auth/settings volume | `/home/node/.claude` | always. A dedicated volume, **separate** from the host's `~/.claude`. |
 | `~/.gitconfig` | `/home/node/.gitconfig` (ro) | only if the file exists. Disable with `CLAUDE_BOX_NO_GITCONFIG=1`. |
 | `~/.claude/settings.json`, `settings.local.json` | `/home/node/.claude/` (**rw**, shared) | **default on** for files that exist. `/config` and permission changes made in the box write through to the host. `CLAUDE_BOX_SETTINGS=ro` mounts them at `/etc/claude-box/host-settings*.json` and merges into the box's own copy instead ([design 08](docs/design/08-host-global-settings-import.md)). |
-| `~/.claude/skills`, `agents`, `commands` | matching paths under `/home/node/.claude` (**rw**, shared) | **default on** for directories that exist. Skills / subagents / slash commands written in the box persist on the host — the one place the box writes back ([design 10](docs/design/10-host-config-import-modes.md)). `CLAUDE_SKILLS_DIR` points skills elsewhere. |
-| Global `CLAUDE.md` | `/etc/claude-box/global-CLAUDE.md` (ro) → **replaces** `/home/node/.claude/CLAUDE.md` | **default on** if the file exists. Replaced at every launch, so in-box edits do not survive; `CLAUDE_BOX_GLOBAL_MD_MODE=rw` shares the file instead. Source overridable with `CLAUDE_BOX_GLOBAL_MD`. |
+| `~/.claude/skills`, `agents`, `commands`, `plugins` | matching paths under `/home/node/.claude` (**rw**, shared) | **default on** for directories that exist. Skills / subagents / slash commands / installed plugins written in the box persist on the host — the one place the box writes back ([design 10](docs/design/10-host-config-import-modes.md)). `CLAUDE_SKILLS_DIR` points skills elsewhere. |
+| Global `CLAUDE.md` | `/home/node/.claude/CLAUDE.md` (**rw**, shared) | **default on** if the file exists. With `CLAUDE_BOX_GLOBAL_MD_MODE=ro` it is mounted at `/etc/claude-box/global-CLAUDE.md` and *replaces* the box's copy at every launch instead. Source overridable with `CLAUDE_BOX_GLOBAL_MD`. |
 | Containers volume | `/home/node/.local/share/containers` | only if `CLAUDE_BOX_NESTED_CONTAINERS=1`. |
 | Request outbox | `/home/node/.claude-box/requests` | **default on** (host `~/.claude-box/requests`, read-write); disable with `CLAUDE_BOX_NO_REQUEST_DIR=1`. |
 
@@ -221,12 +257,20 @@ is not possible. If a version ever loses that fallback, use `CLAUDE_BOX_SETTINGS
 (the box then keeps its own copy) — see
 [design 10](docs/design/10-host-config-import-modes.md).
 
-**The box's global `CLAUDE.md` keeps reverting / an old skill reappeared** — the
-host's `~/.claude` is imported at every launch: `CLAUDE.md` is *replaced* by the
-host's file (edit it on the host, or set `CLAUDE_BOX_GLOBAL_MD_MODE=rw`), and the
-host's `skills`, `agents` and `commands` directories are mounted over whatever the
-box's volume had at those paths. `CLAUDE_BOX_HOST_CONFIG=off` gives you a box with
-none of it ([design 10](docs/design/10-host-config-import-modes.md)).
+**An old skill / plugin reappeared, or in-box config went missing** — the host's
+`~/.claude` is mounted over the box's own copies at every launch, so the host's
+`skills`, `agents`, `commands` and `plugins` directories shadow whatever the box's
+volume had at those paths (it is still in the `claude-box-config` volume, just
+hidden). With `CLAUDE_BOX_GLOBAL_MD_MODE=ro` the box's `CLAUDE.md` is likewise
+replaced by the host's file at every launch. `CLAUDE_BOX_HOST_CONFIG=off` gives you a
+box with none of it ([design 10](docs/design/10-host-config-import-modes.md)).
+
+**`known_marketplaces.json` keeps changing** — it records each marketplace's install
+path absolutely, and the same directory is `/Users/you/.claude/plugins/...` on the
+host and `/home/node/.claude/plugins/...` in the box. Claude Code notices the path is
+outside its own plugins directory and rewrites the entry, so each side repairs the
+file on startup; the plugins themselves work. Set `CLAUDE_BOX_PLUGINS=off` if the
+churn bothers you.
 
 **git fails inside the box** — the mounted `~/.gitconfig` may reference things the
 container cannot resolve (`includeIf`, signing-key paths,

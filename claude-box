@@ -115,11 +115,14 @@ case "$MODE" in
     ;;
 esac
 
-# skills / agents / commands -- read-write by default, because skills, subagents and
-# slash commands written in the box are meant to persist, and a definition that
-# evaporates with the container is not worth writing. The flip side is that the
-# host's Claude loads these same files, so a box running YOLO can leave one behind
-# for it; `ro` (or CLAUDE_BOX_HOST_CONFIG=ro) closes that direction (design 10).
+# skills / agents / commands / plugins -- read-write by default, because skills,
+# subagents, slash commands and installed plugins are meant to persist, and a
+# definition that evaporates with the container is not worth writing. plugins also
+# has to come in for consistency: which plugins are enabled is recorded in
+# settings.json, which is shared, so leaving the plugins themselves behind would tell
+# the box to enable plugins it does not have. The flip side is that the host's Claude
+# loads these same files, so a box running YOLO can leave one behind for it; `ro`
+# (or CLAUDE_BOX_HOST_CONFIG=ro) closes that direction (design 10).
 # CLAUDE_SKILLS_DIR points skills at another directory -- an explicit source, so the
 # family switch does not silence it; if it is set but missing, stop with an explicit
 # error rather than creating it (guards against typos).
@@ -140,25 +143,27 @@ resolve_mode "${CLAUDE_BOX_AGENTS:-}" rw CLAUDE_BOX_AGENTS
 mount_config_dir agents "$MODE"
 resolve_mode "${CLAUDE_BOX_COMMANDS:-}" rw CLAUDE_BOX_COMMANDS
 mount_config_dir commands "$MODE"
+resolve_mode "${CLAUDE_BOX_PLUGINS:-}" rw CLAUDE_BOX_PLUGINS
+mount_config_dir plugins "$MODE"
 
-# Global CLAUDE.md. Default `ro`: mounted read-only at the path below, and entrypoint
-# *replaces* the box's copy with it on every launch, so the box's instructions are
-# exactly what the host says today (a line deleted on the host is gone here too) while
-# in-box edits do not travel back (design 09). With `rw` the host's file is mounted
-# directly instead, and `#`-shortcut memories written in the box land on the host.
+# Global CLAUDE.md. Default `rw`, like everything else: the host's file is mounted
+# straight over the box's copy, so the box reads exactly your house rules and a
+# `#`-shortcut memory written in the box lands on the host. With `ro` it is mounted
+# read-only at the path below instead and entrypoint *replaces* the box's copy with it
+# at every launch -- same content, but in-box edits do not travel back (design 09/10).
 # CLAUDE_BOX_GLOBAL_MD overrides the source file -- an explicit source, so the family
 # switch does not silence it; a path that does not exist is a warning, not a failure.
 GLOBAL_MD_MOUNT=()
 GLOBAL_MD_FILE=""
 if [ -n "${CLAUDE_BOX_GLOBAL_MD:-}" ]; then
-  resolve_mode "${CLAUDE_BOX_GLOBAL_MD_MODE:-ro}" ro CLAUDE_BOX_GLOBAL_MD_MODE
+  resolve_mode "${CLAUDE_BOX_GLOBAL_MD_MODE:-rw}" rw CLAUDE_BOX_GLOBAL_MD_MODE
   if [ -f "$CLAUDE_BOX_GLOBAL_MD" ]; then
     GLOBAL_MD_FILE="$CLAUDE_BOX_GLOBAL_MD"
   else
     echo "claude-box: CLAUDE_BOX_GLOBAL_MD=$CLAUDE_BOX_GLOBAL_MD not found (skipping injection)" >&2
   fi
 else
-  resolve_mode "${CLAUDE_BOX_GLOBAL_MD_MODE:-}" ro CLAUDE_BOX_GLOBAL_MD_MODE
+  resolve_mode "${CLAUDE_BOX_GLOBAL_MD_MODE:-}" rw CLAUDE_BOX_GLOBAL_MD_MODE
   if [ -f "$HOST_CLAUDE_DIR/CLAUDE.md" ]; then
     GLOBAL_MD_FILE="$HOST_CLAUDE_DIR/CLAUDE.md"
   fi

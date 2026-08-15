@@ -33,7 +33,7 @@ Launch the container with least privilege (the `claude-box` script).
   accident.
 - **Bring in as little as possible**: `~/.gitconfig` read-only (opt-out with
   `CLAUDE_BOX_NO_GITCONFIG`); named items of the host's `~/.claude` — settings,
-  `skills/`, `agents/`, `commands/` shared read-write and `CLAUDE.md` read-only by
+  `skills/`, `agents/`, `commands/`, `plugins/` and `CLAUDE.md`, shared read-write by
   default — never the directory as a whole, so credentials, history and per-project
   state stay outside ([08](08-host-global-settings-import.md),
   [09](09-import-host-claude-config.md),

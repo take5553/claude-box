@@ -27,12 +27,14 @@ with the host Claude's.
   **Superseded by [09](09-import-host-claude-config.md)**: the global `CLAUDE.md` is
   now imported by default (from the host's `~/.claude/CLAUDE.md`, or the file named
   by `CLAUDE_BOX_GLOBAL_MD`) and **replaces** the box's copy instead of being
-  appended to it, so a rule deleted on the host no longer lingers in the box.
+  appended to it, so a rule deleted on the host no longer lingers in the box —
+  and since [10](10-host-config-import-modes.md) it is shared read-write by
+  default, with the replace behaviour available as `CLAUDE_BOX_GLOBAL_MD_MODE=ro`.
 - The default notification channel (`preferredNotifChannel`) is written **only
   when the key is unset**, so a manual change is not overwritten.
 - Named items of the host's `~/.claude` are the exception to "nothing from the
-  host's `~/.claude`": settings, `skills/`, `agents/`, `commands/` and `CLAUDE.md`
-  are imported on every launch, shared read-write by default
+  host's `~/.claude`": settings, `skills/`, `agents/`, `commands/`, `plugins/` and
+  `CLAUDE.md` are imported on every launch, shared read-write by default
   ([08](08-host-global-settings-import.md),
   [09](09-import-host-claude-config.md),
   [10](10-host-config-import-modes.md)). Credentials, history and per-project state

@@ -8,9 +8,9 @@ append-based `CLAUDE.md` injection),
 
 > **Amended by [10](10-host-config-import-modes.md).** *What* is imported, and the
 > `CLAUDE.md` replace mechanism, are as described here. *How much the box may write*
-> is not: each item now has an `rw`/`ro`/`off` mode, `rw` is the default for
-> everything except `CLAUDE.md`, and the `CLAUDE_BOX_NO_*` booleans below were
-> replaced by those modes. The read-write `skills/` argument in this note is the one
+> is not: each item now has an `rw`/`ro`/`off` mode, `rw` is the default for every
+> item (`plugins/` was added to the list), and the `CLAUDE_BOX_NO_*` booleans below
+> were replaced by those modes. The read-write `skills/` argument in this note is the one
 > that generalised to `agents/` and `commands/`.
 
 ## Context
@@ -41,8 +41,8 @@ as `claude` itself does.
 | `agents/`, `commands/` | read-only, at the matching paths | directly |
 | `CLAUDE.md` | read-only, at `/etc/claude-box/global-CLAUDE.md` | **replaces** the box's copy at startup |
 
-*(Permissions per [10](10-host-config-import-modes.md): `rw` for settings, skills,
-agents and commands; `ro` for `CLAUDE.md`; each item selectable.)*
+*(Permissions per [10](10-host-config-import-modes.md): `rw` for every item, plus
+`plugins/`; each item selectable.)*
 
 - **Per-item opt-outs** (`CLAUDE_BOX_NO_SETTINGS` / `_NO_SKILLS` / `_NO_AGENTS` /
   `_NO_COMMANDS` / `_NO_GLOBAL_MD`), plus `CLAUDE_BOX_NO_HOST_CONFIG=1` to turn the
@@ -91,6 +91,9 @@ agents and commands; `ro` for `CLAUDE.md`; each item selectable.)*
 - **In-box edits to `CLAUDE.md` do not survive a launch** (including `#`-shortcut
   memories written to the global file). Write them on the host, or keep them in the
   project's `CLAUDE.md`, which is in the mounted project and untouched by this.
+  *(True of `ro` mode, which [10](10-host-config-import-modes.md) made an option
+  rather than the default: on `rw` the file is shared, so those edits land on the
+  host.)*
 - ~~**`agents/` and `commands/` are read-only**, so creating a subagent or a slash
   command *inside* the box fails to save. That is the trade for keeping those
   directories out of the write channel above; `CLAUDE_SKILLS_DIR`-style overrides can
