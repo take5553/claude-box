@@ -172,6 +172,42 @@ volume. The reasoning is in [design 10](docs/design/10-host-config-import-modes.
 | `ALLOW_DOMAINS` | Replace the optional egress list wholesale (space-separated; **core is always kept**). |
 | `SKIP_FIREWALL=1` | Disable the firewall entirely (**unrestricted egress**; prints a warning). |
 
+#### Setting them in `.zshrc`
+
+All of these are read at launch, so `VAR=value claude-box` works for one-off runs and
+`export` in your shell profile sets your normal default. A `.zshrc` block to start
+from:
+
+```sh
+# ---- claude-box -----------------------------------------------------------
+export CLAUDE_BOX_IMAGE=claude-box:latest    # the tag you build locally
+export CLAUDE_BOX_NESTED_CONTAINERS=1        # only if you run docker/compose inside
+
+# Your ~/.claude is shared read-write by default. Uncomment to keep a box from
+# writing any of it back (see the import section above).
+# export CLAUDE_BOX_HOST_CONFIG=ro
+
+# Skills kept in their own repo rather than in ~/.claude/skills
+# export CLAUDE_SKILLS_DIR="$HOME/dev/my-skills"
+
+# Egress destinations you always want (core list is kept regardless)
+# export EXTRA_ALLOW_DOMAINS="pypi.org files.pythonhosted.org"
+
+# GitHub token only when you actually want the box to push / open PRs, pulled from
+# the Keychain at launch and never stored in the box. (Linux: `secret-tool lookup …`)
+cbox-gh() {
+  GH_TOKEN="$(security find-generic-password -s claude-box-gh -w)" claude-box "$@"
+}
+
+# A box that inherits your config but cannot write back — handy for someone else's repo
+alias cbox-ro='CLAUDE_BOX_HOST_CONFIG=ro claude-box'
+# ---------------------------------------------------------------------------
+```
+
+Keep `GH_TOKEN` out of `export`: exporting it hands the token to *every* box (and to
+everything else in your shell). Wrapping the launch, as above, scopes it to the runs
+that need it.
+
 ### What is mounted
 
 Only these host resources enter the box. **The home directory is not mounted.**

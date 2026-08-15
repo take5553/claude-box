@@ -165,6 +165,40 @@ claude-box claude     # 直接 claude を起動する場合
 | `ALLOW_DOMAINS` | egress 許可リストを丸ごと上書き(スペース区切り。**コアは常に残る**) |
 | `SKIP_FIREWALL=1` | ファイアウォールを無効化(**egress 無制限**。警告表示あり) |
 
+#### `.zshrc` での設定例
+
+いずれも起動時に読まれるので、単発なら `VAR=value claude-box`、常用の既定は
+シェルの設定ファイルで `export` する。`.zshrc` の雛形:
+
+```sh
+# ---- claude-box -----------------------------------------------------------
+export CLAUDE_BOX_IMAGE=claude-box:latest    # 自分でビルドしたタグ
+export CLAUDE_BOX_NESTED_CONTAINERS=1        # 箱の中で docker/compose を使うときだけ
+
+# ~/.claude は既定で読み書き共有。箱から一切書き戻させたくないなら外す
+# (上の「ホストの ~/.claude は箱に入る」節を参照)
+# export CLAUDE_BOX_HOST_CONFIG=ro
+
+# スキルを ~/.claude/skills ではなく専用リポジトリで持っている場合
+# export CLAUDE_SKILLS_DIR="$HOME/dev/my-skills"
+
+# 常に開けておきたい egress 先(コアの許可リストは常に維持される)
+# export EXTRA_ALLOW_DOMAINS="pypi.org files.pythonhosted.org"
+
+# GitHub トークンは push / PR をさせたいときだけ。起動時に Keychain から取り、
+# 箱には保存しない(Linux なら `secret-tool lookup …` 等)
+cbox-gh() {
+  GH_TOKEN="$(security find-generic-password -s claude-box-gh -w)" claude-box "$@"
+}
+
+# 設定は引き継ぐが書き戻さない箱(他人のリポジトリを触るとき用)
+alias cbox-ro='CLAUDE_BOX_HOST_CONFIG=ro claude-box'
+# ---------------------------------------------------------------------------
+```
+
+`GH_TOKEN` は `export` しないこと。export するとすべての箱(とシェル上の他のすべて)に
+トークンが渡る。上のように起動を包めば、必要な実行だけに絞れる。
+
 ### コンテナへ持ち込まれるもの(マウント)
 
 箱に入るホスト資源は次だけ。**ホーム全体はマウントしない**。
