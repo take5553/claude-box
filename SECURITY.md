@@ -31,21 +31,24 @@ boundaries before relying on it.
 - **A `GH_TOKEN` you pass in is fully usable by the in-box Claude.** Anything that
   token can do, the box can do. Use a narrowly-scoped, short-lived token, never a
   long-lived personal token with broad scope.
-- **Your Claude Code config comes in with you.** By default the host's
-  `~/.claude` settings, global `CLAUDE.md`, `agents/` and `commands/` are mounted
-  read-only and applied inside the box
-  ([08](docs/design/08-host-global-settings-import.md),
-  [09](docs/design/09-import-host-claude-config.md)), so whatever they contain —
+- **Your Claude Code config comes in with you.** By default the host's `~/.claude`
+  settings, global `CLAUDE.md`, `skills/`, `agents/` and `commands/` are applied
+  inside the box ([08](docs/design/08-host-global-settings-import.md),
+  [09](docs/design/09-import-host-claude-config.md),
+  [10](docs/design/10-host-config-import-modes.md)), so whatever they contain —
   `hooks`, `env`, `apiKeyHelper` — is readable and runnable *inside* the box. If you
-  keep secrets there, they travel. Opt out with `CLAUDE_BOX_NO_HOST_CONFIG=1` (or
-  per item).
-- **`~/.claude/skills` is mounted read-write — the one path from the box back to the
-  host.** It is deliberate: skills written in the box are meant to persist. But the
-  box runs YOLO, and the host's Claude Code loads those same files, so a skill left
-  behind there runs on your host later. Review changes to that directory the way you
-  review the project diff, or cut the channel with `CLAUDE_SKILLS_DIR` pointed at a
-  scratch directory, `CLAUDE_BOX_NO_SKILLS=1`, or `CLAUDE_BOX_NO_HOST_CONFIG=1`
-  ([09](docs/design/09-import-host-claude-config.md)).
+  keep secrets there, they travel.
+- **By default the box can also write that config back to the host.** `settings.json`,
+  `settings.local.json`, `skills/`, `agents/` and `commands/` are **shared
+  read-write**: it is how a skill or a setting produced in the box persists. But the
+  box runs YOLO, and your *host's* Claude Code loads those same files afterwards — a
+  hook added to `settings.json` or a skill left in `skills/` runs on your host later.
+  This is the one place the box's blast radius reaches the host, and it is a choice:
+  `CLAUDE_BOX_HOST_CONFIG=ro` brings the config in while blocking every write back,
+  `=off` brings nothing, and per-item variables (`CLAUDE_BOX_SETTINGS=ro`, …) do the
+  same one item at a time. Keeping `~/.claude` under version control, or diffing it
+  after a session, is the cheap way to see what came back
+  ([10](docs/design/10-host-config-import-modes.md)).
 - **You can turn the protections off yourself.** `SKIP_FIREWALL=1` disables egress
   filtering entirely (unrestricted outbound), and `ALLOW_DOMAINS` replaces the
   optional allow-list. These are intentional escape hatches; using them is on you.

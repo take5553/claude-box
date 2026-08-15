@@ -21,11 +21,12 @@ keeping the blast radius inside the box: two walls — **file isolation** and a
 - **Default-deny egress, judged by hostname.** All 80/443 traffic is
   force-redirected through a local proxy that allows only a whitelist by TLS SNI /
   HTTP Host. TLS is **not** decrypted.
-- Auth and settings persist in a dedicated volume, kept separate from the host's.
-  Named items of your `~/.claude` — settings, global `CLAUDE.md`, agents, commands —
-  are imported **read-only** so a box behaves like the Claude you configured;
-  `skills/` is the one read-write exception, so skills written in the box persist
-  ([design 09](docs/design/09-import-host-claude-config.md)).
+- Credentials and history persist in a dedicated volume, kept separate from the
+  host's. Named items of your `~/.claude` — settings, `skills/`, `agents/`,
+  `commands/` and the global `CLAUDE.md` — are imported so a box behaves like the
+  Claude you configured, **shared read-write by default**;
+  `CLAUDE_BOX_HOST_CONFIG=ro` (or `off`) keeps the box from writing any of it back
+  ([design 10](docs/design/10-host-config-import-modes.md)).
 
 **Deliberately closed** (the point, not an oversight)
 
@@ -119,17 +120,16 @@ Inside the box, typing `claude` launches it in YOLO mode; management subcommands
 | Variable | Effect |
 |---|---|
 | `GH_TOKEN` | Allow GitHub operations (push/PR/issue). Pass a narrowly-scoped, short-lived token **only at runtime** (never stored). |
-| `CLAUDE_SKILLS_DIR` | Skills directory to mount (read-write) **instead of** the host's `~/.claude/skills`. A non-existent path is an error. |
-| `CLAUDE_BOX_GLOBAL_MD` | Instructions file to use **instead of** the host's `~/.claude/CLAUDE.md`. It *replaces* the container's global `CLAUDE.md` at every launch. |
+| `CLAUDE_SKILLS_DIR` | Skills directory to mount **instead of** the host's `~/.claude/skills`. A non-existent path is an error. |
+| `CLAUDE_BOX_GLOBAL_MD` | Instructions file to use **instead of** the host's `~/.claude/CLAUDE.md`. |
 | `CLAUDE_BOX_ENGINE` | Container engine (docker-compatible CLI). Default `docker`; only docker is verified. |
 | `CLAUDE_BOX_IMAGE` | Image to run. Default `claude-box:latest`. |
 | `CLAUDE_BOX_NESTED_CONTAINERS=1` | Enable in-container rootless Podman (adds relaxations). **Off by default** — see [Security model](#security-model). |
 | `CLAUDE_BOX_NO_GITCONFIG=1` | Do not mount `~/.gitconfig` (avoids host-specific settings breaking git). |
-| `CLAUDE_BOX_NO_HOST_CONFIG=1` | Import nothing from the host's `~/.claude` — settings, skills, `CLAUDE.md`, agents, commands (all imported by default). |
-| `CLAUDE_BOX_NO_SETTINGS=1` | Do not import the host's global `settings.json` / `settings.local.json`. |
-| `CLAUDE_BOX_NO_SKILLS=1` | Do not mount the host's `~/.claude/skills`. |
-| `CLAUDE_BOX_NO_GLOBAL_MD=1` | Do not import the host's global `CLAUDE.md`. |
-| `CLAUDE_BOX_NO_AGENTS=1` / `CLAUDE_BOX_NO_COMMANDS=1` | Do not mount the host's `~/.claude/agents` / `commands`. |
+| `CLAUDE_BOX_HOST_CONFIG` | Import mode for **everything** from the host's `~/.claude`: `rw` / `ro` / `off`. `off` = a pristine box; `ro` = bring it all in, but the box can never write back. Per-item variables below override it. |
+| `CLAUDE_BOX_SETTINGS` | Mode for `settings.json` / `settings.local.json`. Default `rw` (shared with the host); `ro` merges them into the box's own copy instead. |
+| `CLAUDE_BOX_SKILLS` / `CLAUDE_BOX_AGENTS` / `CLAUDE_BOX_COMMANDS` | Mode for `~/.claude/skills` / `agents` / `commands`. Default `rw`. |
+| `CLAUDE_BOX_GLOBAL_MD_MODE` | Mode for the global `CLAUDE.md`. Default `ro` (the host's file replaces the box's copy at startup); `rw` shares the file, so `#` memories written in the box land on the host. |
 | `CLAUDE_BOX_REQUEST_DIR` | Host folder for the env-request outbox. **On by default** (`~/.claude-box/requests`); set this to relocate it. |
 | `CLAUDE_BOX_NO_REQUEST_DIR=1` | Turn off the env-request outbox (on by default). |
 | `EXTRA_ALLOW_DOMAINS` | **Add** egress destinations (core always included; space-separated). |
@@ -145,10 +145,9 @@ Only these host resources enter the box. **The home directory is not mounted.**
 | Current project | **same absolute path as the host** (e.g. `/home/you/project`) | always, read-write. Claude Code keys its history on the current path, so a fixed `/workspace` would blend every project's history. **The matching path is why — the home directory is not mounted.** |
 | Auth/settings volume | `/home/node/.claude` | always. A dedicated volume, **separate** from the host's `~/.claude`. |
 | `~/.gitconfig` | `/home/node/.gitconfig` (ro) | only if the file exists. Disable with `CLAUDE_BOX_NO_GITCONFIG=1`. |
-| Global `settings.json` / `settings.local.json` | `/etc/claude-box/host-settings*.json` (ro), merged into `/home/node/.claude/` | **default on**, only for files that exist. Read-only + merged, so the host's copy is never written ([design 08](docs/design/08-host-global-settings-import.md)). Disable with `CLAUDE_BOX_NO_SETTINGS=1`. |
-| `~/.claude/skills` | `/home/node/.claude/skills` (**read-write**) | **default on** if the directory exists. Read-write on purpose — skills written in the box persist, and that is the one path where the box writes to the host ([design 09](docs/design/09-import-host-claude-config.md)). `CLAUDE_SKILLS_DIR` points it elsewhere; `CLAUDE_BOX_NO_SKILLS=1` disables it. |
-| `~/.claude/agents`, `~/.claude/commands` | matching paths under `/home/node/.claude` (ro) | **default on** if they exist. Read-only, so creating one *inside* the box does not save. Disable with `CLAUDE_BOX_NO_AGENTS=1` / `CLAUDE_BOX_NO_COMMANDS=1`. |
-| Global `CLAUDE.md` | `/etc/claude-box/global-CLAUDE.md` (ro) → **replaces** `/home/node/.claude/CLAUDE.md` | **default on** if the file exists. Replaced at every launch, so in-box edits do not survive. Source overridable with `CLAUDE_BOX_GLOBAL_MD`; disable with `CLAUDE_BOX_NO_GLOBAL_MD=1`. |
+| `~/.claude/settings.json`, `settings.local.json` | `/home/node/.claude/` (**rw**, shared) | **default on** for files that exist. `/config` and permission changes made in the box write through to the host. `CLAUDE_BOX_SETTINGS=ro` mounts them at `/etc/claude-box/host-settings*.json` and merges into the box's own copy instead ([design 08](docs/design/08-host-global-settings-import.md)). |
+| `~/.claude/skills`, `agents`, `commands` | matching paths under `/home/node/.claude` (**rw**, shared) | **default on** for directories that exist. Skills / subagents / slash commands written in the box persist on the host — the one place the box writes back ([design 10](docs/design/10-host-config-import-modes.md)). `CLAUDE_SKILLS_DIR` points skills elsewhere. |
+| Global `CLAUDE.md` | `/etc/claude-box/global-CLAUDE.md` (ro) → **replaces** `/home/node/.claude/CLAUDE.md` | **default on** if the file exists. Replaced at every launch, so in-box edits do not survive; `CLAUDE_BOX_GLOBAL_MD_MODE=rw` shares the file instead. Source overridable with `CLAUDE_BOX_GLOBAL_MD`. |
 | Containers volume | `/home/node/.local/share/containers` | only if `CLAUDE_BOX_NESTED_CONTAINERS=1`. |
 | Request outbox | `/home/node/.claude-box/requests` | **default on** (host `~/.claude-box/requests`, read-write); disable with `CLAUDE_BOX_NO_REQUEST_DIR=1`. |
 
@@ -209,19 +208,25 @@ enable with `CLAUDE_BOX_NESTED_CONTAINERS=1` (and `WITH_PODMAN` must be baked in
 volume is missing — see [design 05](docs/design/05-nested-containers-rootless-podman.md).
 On a Linux host with AppArmor, also add `--security-opt apparmor=unconfined`.
 
-**A hook / `statusLine` fails inside the box** — the imported global settings may
-point at commands or paths that exist only on the host (`hooks`, `statusLine`,
-`apiKeyHelper`). Turn the import off with `CLAUDE_BOX_NO_SETTINGS=1`, or move the
-host-specific entries out of the global `settings.json`. Note that a merged key is
-not removed by deleting it on the host — edit it inside the box, or recreate the
-`claude-box-config` volume ([design 08](docs/design/08-host-global-settings-import.md)).
+**A hook / `statusLine` fails inside the box** — the imported settings may point at
+commands or paths that exist only on the host (`hooks`, `statusLine`,
+`apiKeyHelper`). Set `CLAUDE_BOX_SETTINGS=off`, or move the host-specific entries out
+of the global `settings.json`. With `CLAUDE_BOX_SETTINGS=ro` you can also fix it
+inside the box: the box's merged copy is writable and never reaches the host.
+
+**Changing a setting inside the box fails to save** — with the default
+`CLAUDE_BOX_SETTINGS=rw` the host's `settings.json` is bind-mounted as a file, and
+`claude` rewrites it through an in-place fallback because renaming onto a bind mount
+is not possible. If a version ever loses that fallback, use `CLAUDE_BOX_SETTINGS=ro`
+(the box then keeps its own copy) — see
+[design 10](docs/design/10-host-config-import-modes.md).
 
 **The box's global `CLAUDE.md` keeps reverting / an old skill reappeared** — the
 host's `~/.claude` is imported at every launch: `CLAUDE.md` is *replaced* by the
-host's file (edit it on the host, not in the box), and the host's `skills`, `agents`
-and `commands` directories are mounted over whatever the box's volume had at those
-paths. `CLAUDE_BOX_NO_HOST_CONFIG=1` gives you a box with none of it
-([design 09](docs/design/09-import-host-claude-config.md)).
+host's file (edit it on the host, or set `CLAUDE_BOX_GLOBAL_MD_MODE=rw`), and the
+host's `skills`, `agents` and `commands` directories are mounted over whatever the
+box's volume had at those paths. `CLAUDE_BOX_HOST_CONFIG=off` gives you a box with
+none of it ([design 10](docs/design/10-host-config-import-modes.md)).
 
 **git fails inside the box** — the mounted `~/.gitconfig` may reference things the
 container cannot resolve (`includeIf`, signing-key paths,

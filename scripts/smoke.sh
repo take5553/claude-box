@@ -25,12 +25,12 @@ pass() { echo "  ok: $*"; }
 fail() { echo "  FAIL: $*" >&2; exit 1; }
 
 if [ "${SKIP_BUILD:-0}" != "1" ]; then
-  echo "[1/6] build image ($IMAGE)"
+  echo "[1/7] build image ($IMAGE)"
   # shellcheck disable=SC2086  # BUILD_ARGS is intentionally word-split
   "$ENGINE" build $BUILD_ARGS -t "$IMAGE" .
 fi
 
-echo "[2/6] init-firewall startup self-check (allowed reachable, disallowed blocked)"
+echo "[2/7] init-firewall startup self-check (allowed reachable, disallowed blocked)"
 # The entrypoint runs init-firewall.sh, which exits non-zero if any self-check fails.
 if "$ENGINE" run --rm "${FIREWALL_CAPS[@]}" "$IMAGE" true; then
   pass "startup firewall self-check passed"
@@ -38,7 +38,7 @@ else
   fail "startup firewall self-check failed"
 fi
 
-echo "[3/6] a disallowed host is blocked at runtime"
+echo "[3/7] a disallowed host is blocked at runtime"
 if "$ENGINE" run --rm "${FIREWALL_CAPS[@]}" "$IMAGE" \
      curl -fsS -m 10 https://example.com >/dev/null 2>&1; then
   fail "reached https://example.com (should be blocked)"
@@ -46,7 +46,7 @@ else
   pass "https://example.com blocked"
 fi
 
-echo "[4/6] runs non-root with no effective capabilities"
+echo "[4/7] runs non-root with no effective capabilities"
 # The entrypoint prints firewall logs to stdout before exec-ing the command, so the
 # value we want is the last line of the captured output.
 who="$("$ENGINE" run --rm "${FIREWALL_CAPS[@]}" "$IMAGE" id -un | tail -n1)"
@@ -57,7 +57,7 @@ capeff="$("$ENGINE" run --rm "${FIREWALL_CAPS[@]}" "$IMAGE" \
 [ "$capeff" = "0000000000000000" ] || fail "expected empty CapEff, got '$capeff'"
 pass "CapEff is empty (0000000000000000)"
 
-echo "[5/6] nested container pull (optional)"
+echo "[5/7] nested container pull (optional)"
 if [ "${SMOKE_NESTED:-0}" = "1" ]; then
   if "$ENGINE" run --rm "${FIREWALL_CAPS[@]}" \
        --security-opt seccomp=unconfined --security-opt systempaths=unconfined \
@@ -72,7 +72,7 @@ else
   echo "  skipped (set SMOKE_NESTED=1 to run; needs the nested-container relaxations)"
 fi
 
-echo "[6/6] the host's config is imported (settings merged, CLAUDE.md replaced)"
+echo "[6/7] host config in ro mode (settings merged, CLAUDE.md replaced)"
 # claude-box mounts the host's files read-only at the paths below; the entrypoint
 # merges settings.json into the box's copy and replaces the box's CLAUDE.md with the
 # host's (design 08 / 09). A throwaway volume stands in for claude-box-config, so the
@@ -105,5 +105,32 @@ esac
   && [ "$(cat "$HOSTCFG_TMP/CLAUDE.md")" = 'imported from the host' ] \
   || fail "a host file was modified from inside the box"
 pass "the host's files are untouched"
+
+echo "[7/7] host config in rw mode (the default): writes reach the host's file"
+# In rw mode the host's settings.json is bind-mounted as a file over the box's copy.
+# claude saves settings by writing a temp file and renaming it over the target, which
+# a file bind mount refuses (EBUSY) -- it then falls back to an in-place write, and
+# that is the path this checks: rename fails, in-place write lands on the host
+# (design 10). If this step ever fails, rw settings are broken and ro is the fallback.
+printf '{"model":"from-host"}\n' > "$HOSTCFG_TMP/rw-settings.json"
+rw_out="$("$ENGINE" run --rm "${FIREWALL_CAPS[@]}" \
+            -v "$HOSTCFG_TMP/rw-settings.json:/home/node/.claude/settings.json" \
+            "$IMAGE" sh -c '
+              printf "{\"model\":\"renamed\"}\n" > /tmp/new.json
+              mv /tmp/new.json "$CLAUDE_CONFIG_DIR/settings.json" 2>/dev/null \
+                && echo RENAME_OK || echo RENAME_REFUSED
+              printf "{\"model\":\"from-box\"}\n" > "$CLAUDE_CONFIG_DIR/settings.json" \
+                && echo INPLACE_OK || echo INPLACE_FAILED')"
+case "$rw_out" in
+  *RENAME_OK*) echo "  note: rename over the bind-mounted file succeeded on this engine" ;;
+  *) pass "rename over the bind-mounted file is refused (the fallback's trigger)" ;;
+esac
+case "$rw_out" in
+  *INPLACE_OK*) pass "in-place write from the box succeeded" ;;
+  *) fail "in-place write from the box failed — rw settings would not save" ;;
+esac
+[ "$(cat "$HOSTCFG_TMP/rw-settings.json")" = '{"model":"from-box"}' ] \
+  || fail "the box's write did not reach the host's file (got '$(cat "$HOSTCFG_TMP/rw-settings.json")')"
+pass "the box's write reached the host's settings.json"
 
 echo "smoke: all checks passed"

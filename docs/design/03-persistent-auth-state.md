@@ -30,18 +30,23 @@ with the host Claude's.
   appended to it, so a rule deleted on the host no longer lingers in the box.
 - The default notification channel (`preferredNotifChannel`) is written **only
   when the key is unset**, so a manual change is not overwritten.
-- The host's global `settings.json` / `settings.local.json` are the one exception to
-  "nothing from the host's `~/.claude`": they are imported **one-way** — mounted
-  read-only and merged into the box's own settings on every launch
-  ([08](08-host-global-settings-import.md)).
+- Named items of the host's `~/.claude` are the exception to "nothing from the
+  host's `~/.claude`": settings, `skills/`, `agents/`, `commands/` and `CLAUDE.md`
+  are imported on every launch, shared read-write by default
+  ([08](08-host-global-settings-import.md),
+  [09](09-import-host-claude-config.md),
+  [10](10-host-config-import-modes.md)). Credentials, history and per-project state
+  are not among them and stay in the volume.
 
 ## Consequences
 
 ### Good
 
 - Even with disposable containers, you log in once.
-- State is physically separated from the host; box settings do not leak into the
-  host Claude (the settings import is read-only and host → box only).
+- State is physically separated from the host: credentials, history and session
+  state never leave the volume. The *config* items above are shared on purpose —
+  `CLAUDE_BOX_HOST_CONFIG=ro` keeps even those from flowing back
+  ([10](10-host-config-import-modes.md)).
 - Idempotent init is safe to re-run (tolerant of re-execution).
 
 ### Trade-offs and notes

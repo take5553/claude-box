@@ -11,8 +11,10 @@ fi
 
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-/home/node/.claude}"
 
-# The global CLAUDE.md: claude-box mounts the host's ~/.claude/CLAUDE.md (or the file
-# named by CLAUDE_BOX_GLOBAL_MD) read-only at the path below, and we *replace* the
+# The global CLAUDE.md, in `ro` mode (the default): claude-box mounts the host's
+# ~/.claude/CLAUDE.md (or the file named by CLAUDE_BOX_GLOBAL_MD) read-only at the
+# path below -- in `rw` mode it is mounted over the box's copy instead and none of
+# this runs, because there is nothing to copy. Here we *replace* the
 # box's copy with it on every launch. Replace, not append: the box's instructions are
 # then exactly what the host file says today, so deleting a line on the host deletes
 # it here too -- stale instructions that quietly keep steering Claude are worse than
@@ -27,8 +29,9 @@ if [ -f "$GLOBAL_MD_SRC" ]; then
   cat "$GLOBAL_MD_SRC" > "$CLAUDE_MD.tmp" && mv "$CLAUDE_MD.tmp" "$CLAUDE_MD"
 fi
 
-# Bring in the host's global settings (settings.json / settings.local.json), which
-# claude-box mounts read-only at the paths below unless CLAUDE_BOX_NO_SETTINGS=1.
+# Bring in the host's global settings (settings.json / settings.local.json) in `ro`
+# mode: claude-box mounts them read-only at the paths below (in `rw` mode they are
+# mounted over the box's own copies instead, and none of this runs).
 # Merge rather than replace: jq's `*` merges objects recursively, so host keys win
 # while keys only the box has -- theme / effortLevel and the like, which claude
 # itself writes into the box's settings.json -- survive. This runs on every launch,

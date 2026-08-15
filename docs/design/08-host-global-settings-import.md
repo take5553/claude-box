@@ -1,11 +1,20 @@
 # 08 — Import the host's global settings one-way (read-only → merge)
 
+> **Amended by [10](10-host-config-import-modes.md).** What this note decided is now
+> the **`ro` mode** for settings, and it is no longer the default: settings are
+> shared read-write with the host unless you ask for `ro`. The mechanism below
+> (read-only mount at a dedicated path, jq merge into the box's copy) is unchanged
+> and still what `ro` does — but read [10](10-host-config-import-modes.md) for what
+> the box does by default, and why the write direction this note closes was later
+> opened deliberately.
+
 Related: [03 — persistent auth and state](03-persistent-auth-state.md),
 [01 — isolation model](01-isolation-model.md),
 [04 — YOLO by default](04-yolo-by-default.md),
 [09 — importing the rest of the host's Claude config](09-import-host-claude-config.md)
-(which extends this to skills, instructions, agents and commands — and, for
-`skills/` only, deliberately opens the write direction this note closes)
+(which extends this to skills, instructions, agents and commands),
+[10 — import modes](10-host-config-import-modes.md) (which makes the write direction
+this note closes a choice, open by default)
 
 ## Context
 
@@ -43,11 +52,11 @@ letting anything out?
   the host wholesale. Editing the host file takes effect on the next start, and
   recreating the volume restores the settings — the "idempotent init" property the
   box relies on elsewhere ([03](03-persistent-auth-state.md)).
-- **On by default, opt out with `CLAUDE_BOX_NO_SETTINGS=1`**, following `~/.gitconfig`
+- **On by default, opt out with `CLAUDE_BOX_SETTINGS=off`**, following `~/.gitconfig`
   ([01](01-isolation-model.md)): an existing host config file is brought in read-only
   when it is there, and one flag turns it off. ([09](09-import-host-claude-config.md)
   later applies the same default to the rest of the host's `~/.claude`, and adds
-  `CLAUDE_BOX_NO_HOST_CONFIG=1` for the whole family.)
+  `CLAUDE_BOX_HOST_CONFIG` for the whole family.)
 - **A malformed host file is skipped with a warning**, never fatal: a typo in
   `settings.json` must not make the box unlaunchable.
 
@@ -66,7 +75,7 @@ letting anything out?
 - **Host-only settings can break inside the box.** `hooks`, `statusLine` and
   `apiKeyHelper` may invoke commands or paths that exist only on the host. This is
   the same class of problem as a `~/.gitconfig` with `credential.helper=osxkeychain`,
-  and has the same remedy: `CLAUDE_BOX_NO_SETTINGS=1`, or move the host-specific bits
+  and has the same remedy: `CLAUDE_BOX_SETTINGS=off`, or move the host-specific bits
   out of the global file.
 - **Deletions do not propagate.** A merge only adds and overwrites, so a key removed
   on the host lingers in the box until it is edited out there (or the volume is

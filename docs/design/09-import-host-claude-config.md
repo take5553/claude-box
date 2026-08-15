@@ -6,6 +6,13 @@ append-based `CLAUDE.md` injection),
 [01 — isolation model](01-isolation-model.md),
 [04 — YOLO by default](04-yolo-by-default.md)
 
+> **Amended by [10](10-host-config-import-modes.md).** *What* is imported, and the
+> `CLAUDE.md` replace mechanism, are as described here. *How much the box may write*
+> is not: each item now has an `rw`/`ro`/`off` mode, `rw` is the default for
+> everything except `CLAUDE.md`, and the `CLAUDE_BOX_NO_*` booleans below were
+> replaced by those modes. The read-write `skills/` argument in this note is the one
+> that generalised to `agents/` and `commands/`.
+
 ## Context
 
 [08](08-host-global-settings-import.md) brought the host's `settings.json` into the
@@ -34,9 +41,14 @@ as `claude` itself does.
 | `agents/`, `commands/` | read-only, at the matching paths | directly |
 | `CLAUDE.md` | read-only, at `/etc/claude-box/global-CLAUDE.md` | **replaces** the box's copy at startup |
 
+*(Permissions per [10](10-host-config-import-modes.md): `rw` for settings, skills,
+agents and commands; `ro` for `CLAUDE.md`; each item selectable.)*
+
 - **Per-item opt-outs** (`CLAUDE_BOX_NO_SETTINGS` / `_NO_SKILLS` / `_NO_AGENTS` /
   `_NO_COMMANDS` / `_NO_GLOBAL_MD`), plus `CLAUDE_BOX_NO_HOST_CONFIG=1` to turn the
   whole family off in one go — the pristine box, for testing the box itself.
+  *(Replaced by the mode variables of [10](10-host-config-import-modes.md);
+  `CLAUDE_BOX_HOST_CONFIG=off` is the pristine box now.)*
 - `CLAUDE_SKILLS_DIR` and `CLAUDE_BOX_GLOBAL_MD` keep working as **source
   overrides**, and stay independent of the family switch.
 - **`CLAUDE.md` is replaced, not appended.** This reverses the line-by-line
@@ -61,7 +73,8 @@ as `claude` itself does.
   launch, deletions included.
 - Skills written inside the box survive it, and are usable on the host.
 - Turning any of it off is one environment variable; the previous fully-isolated
-  behaviour is `CLAUDE_BOX_NO_HOST_CONFIG=1`.
+  behaviour is `CLAUDE_BOX_HOST_CONFIG=off`
+  ([10](10-host-config-import-modes.md)).
 
 ### Trade-offs and notes
 
@@ -72,15 +85,19 @@ as `claude` itself does.
   read-only. It is opened knowingly, in exchange for skills that persist; it is the
   one place where the box's blast radius reaches the host by design. Mitigations, in
   order of bluntness: point `CLAUDE_SKILLS_DIR` at a scratch directory, or set
-  `CLAUDE_BOX_NO_SKILLS=1` / `CLAUDE_BOX_NO_HOST_CONFIG=1`. Reviewing `git diff` in
-  the skills directory after a session is the cheap habit that makes it visible.
+  `CLAUDE_BOX_SKILLS=ro` / `CLAUDE_BOX_HOST_CONFIG=ro` / `=off`
+  ([10](10-host-config-import-modes.md)). Reviewing `git diff` in the skills
+  directory after a session is the cheap habit that makes it visible.
 - **In-box edits to `CLAUDE.md` do not survive a launch** (including `#`-shortcut
   memories written to the global file). Write them on the host, or keep them in the
   project's `CLAUDE.md`, which is in the mounted project and untouched by this.
-- **`agents/` and `commands/` are read-only**, so creating a subagent or a slash
+- ~~**`agents/` and `commands/` are read-only**, so creating a subagent or a slash
   command *inside* the box fails to save. That is the trade for keeping those
   directories out of the write channel above; `CLAUDE_SKILLS_DIR`-style overrides can
-  be added later if the need is real.
+  be added later if the need is real.~~ **Reversed by
+  [10](10-host-config-import-modes.md)**: the need was real, and the `skills/`
+  argument applies verbatim — both are read-write by default now, with `ro` available
+  per item.
 - **A mounted directory shadows whatever the volume had at that path.** Skills or
   agents created in an earlier box (before this change) are hidden while the host's
   directories are mounted — they are still in the `claude-box-config` volume.
