@@ -1,5 +1,14 @@
 # 10 — Host config import modes: `rw` by default, `ro`/`off` per item
 
+> **Defaults reversed by [11](11-read-only-by-default-and-telling-claude.md).** The
+> three modes, the per-item variables and `CLAUDE_BOX_HOST_CONFIG` are all as described
+> here and still in force. What changed is which one you get by default: `ro` for
+> settings, skills, agents, commands and `CLAUDE.md` (with `plugins/` staying `rw`),
+> because the permissive default handed every user the box → host write path this
+> repository otherwise works to keep closed. Read
+> [11](11-read-only-by-default-and-telling-claude.md) for the current defaults and for
+> how the box now *tells* claude which variable to ask for.
+
 Related: [09 — importing the host's Claude config](09-import-host-claude-config.md)
 (this note replaces its fixed per-item permissions with a mode),
 [08 — importing the host's global settings](08-host-global-settings-import.md)

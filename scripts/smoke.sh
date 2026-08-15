@@ -72,7 +72,7 @@ else
   echo "  skipped (set SMOKE_NESTED=1 to run; needs the nested-container relaxations)"
 fi
 
-echo "[6/7] host config in ro mode (settings merged, CLAUDE.md replaced)"
+echo "[6/7] host config in ro mode, the default (settings merged, CLAUDE.md replaced, note written)"
 # claude-box mounts the host's files read-only at the paths below; the entrypoint
 # merges settings.json into the box's copy and replaces the box's CLAUDE.md with the
 # host's (design 08 / 09). A throwaway volume stands in for claude-box-config, so the
@@ -91,7 +91,8 @@ printf 'imported from the host\n' > "$HOSTCFG_TMP/CLAUDE.md"
 out="$("$ENGINE" run --rm "${FIREWALL_CAPS[@]}" -v "$SMOKE_VOLUME:/home/node/.claude" \
          -v "$HOSTCFG_TMP/settings.json:/etc/claude-box/host-settings.json:ro" \
          -v "$HOSTCFG_TMP/CLAUDE.md:/etc/claude-box/global-CLAUDE.md:ro" \
-         "$IMAGE" sh -c 'jq -c . "$CLAUDE_CONFIG_DIR/settings.json"; cat "$CLAUDE_CONFIG_DIR/CLAUDE.md"')"
+         -e CLAUDE_BOX_MODES='CLAUDE_BOX_SETTINGS=ro CLAUDE_BOX_SKILLS=ro' \
+         "$IMAGE" sh -c 'jq -c . "$CLAUDE_CONFIG_DIR/settings.json"; cat "$CLAUDE_CONFIG_DIR/CLAUDE.md"; cat "$CLAUDE_BOX_NOTES"')"
 case "$out" in
   *'"model":"opus"'*) pass "host settings merged into the box's settings.json" ;;
   *) fail "expected the host's keys in the box's settings.json, got '$out'" ;;
@@ -101,17 +102,24 @@ case "$out" in
   *"imported from the host"*) pass "host CLAUDE.md replaced the box's copy" ;;
   *) fail "expected the host's CLAUDE.md in the box, got '$out'" ;;
 esac
+# The note is how the in-box claude learns that a ~/.claude change will not reach the
+# host and which variable would let it (design 11); losing it fails silently, so check.
+case "$out" in
+  *CLAUDE_BOX_SKILLS=ro*claude-box*) pass "the box's note states the modes and the way out" ;;
+  *) fail "expected the import-mode note from the entrypoint, got '$out'" ;;
+esac
 [ "$(cat "$HOSTCFG_TMP/settings.json")" = '{"model":"opus","permissions":{"allow":["Bash(ls)"]}}' ] \
   && [ "$(cat "$HOSTCFG_TMP/CLAUDE.md")" = 'imported from the host' ] \
   || fail "a host file was modified from inside the box"
 pass "the host's files are untouched"
 
-echo "[7/7] host config in rw mode (the default): writes reach the host's file"
+echo "[7/7] host config in rw mode (opt-in, and the plugins default): writes reach the host"
 # In rw mode the host's settings.json is bind-mounted as a file over the box's copy.
 # claude saves settings by writing a temp file and renaming it over the target, which
 # a file bind mount refuses (EBUSY) -- it then falls back to an in-place write, and
 # that is the path this checks: rename fails, in-place write lands on the host
-# (design 10). If this step ever fails, rw settings are broken and ro is the fallback.
+# (design 10). If this step ever fails, rw settings are broken and ro is the fallback
+# -- and since plugins/ is rw by default (design 11), so is that import.
 printf '{"model":"from-host"}\n' > "$HOSTCFG_TMP/rw-settings.json"
 rw_out="$("$ENGINE" run --rm "${FIREWALL_CAPS[@]}" \
             -v "$HOSTCFG_TMP/rw-settings.json:/home/node/.claude/settings.json" \

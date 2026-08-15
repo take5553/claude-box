@@ -33,12 +33,12 @@ Launch the container with least privilege (the `claude-box` script).
   accident.
 - **Bring in as little as possible**: `~/.gitconfig` read-only (opt-out with
   `CLAUDE_BOX_NO_GITCONFIG`); named items of the host's `~/.claude` — settings,
-  `skills/`, `agents/`, `commands/`, `plugins/` and `CLAUDE.md`, shared read-write by
-  default — never the directory as a whole, so credentials, history and per-project
-  state stay outside ([08](08-host-global-settings-import.md),
+  `skills/`, `agents/`, `commands/`, `plugins/` and `CLAUDE.md`, **read-only by
+  default** (`plugins/` excepted) — never the directory as a whole, so credentials,
+  history and per-project state stay outside ([08](08-host-global-settings-import.md),
   [09](09-import-host-claude-config.md),
-  [10](10-host-config-import-modes.md): each item is `rw`/`ro`/`off`, and
-  `CLAUDE_BOX_HOST_CONFIG` sets all of them at once). A GitHub token (`GH_TOKEN`) is
+  [10](10-host-config-import-modes.md), [11](11-read-only-by-default-and-telling-claude.md):
+  each item is `rw`/`ro`/`off`, and `CLAUDE_BOX_HOST_CONFIG` sets all of them at once). A GitHub token (`GH_TOKEN`) is
   never stored — it is passed as an environment variable *only at runtime*.
 
 ## Consequences

@@ -71,6 +71,48 @@ else
   printf '{"preferredNotifChannel":"terminal_bell"}\n' > "$CLAUDE_JSON"
 fi
 
+# Tell the in-box claude how the host's config was imported (design 11). The import is
+# read-only by default, and the two halves of "read-only" fail differently: writing into
+# skills/ or agents/ fails outright (EROFS), while a settings.json or CLAUDE.md edit
+# *succeeds* against the box's own copy and simply never reaches the host. The second
+# kind is the dangerous one -- nothing surfaces, and the user finds out later that their
+# change is not on their machine -- so rather than relying on claude noticing an error,
+# state the modes up front and say what to do about them.
+#
+# This lives in claude's system prompt, not in ~/.claude/CLAUDE.md: in rw mode that file
+# *is* the host's file, and writing the box's own notes into it would put box text on the
+# user's machine -- exactly what the read-only default exists to prevent.
+CLAUDE_BOX_NOTES=""
+if [ -n "${CLAUDE_BOX_MODES:-}" ] && claude --help 2>/dev/null | grep -q -- '--append-system-prompt'; then
+  CLAUDE_BOX_NOTES=/tmp/claude-box/box-notes.md
+  mkdir -p "$(dirname "$CLAUDE_BOX_NOTES")"
+  {
+    echo "# claude-box"
+    echo
+    echo "You are running inside claude-box: a container with default-deny egress that"
+    echo "mounts only the current project. The host's Claude Code config was imported"
+    echo "with these modes:"
+    echo
+    for mode in ${CLAUDE_BOX_MODES}; do echo "- ${mode}"; done
+    echo
+    echo "\`ro\` means the item is here but the host's copy is never written: a write into"
+    echo "\`~/.claude/skills\`, \`agents\` or \`commands\` fails with EROFS, while an edit to"
+    echo "\`~/.claude/settings.json\` or \`~/.claude/CLAUDE.md\` succeeds against this"
+    echo "container's own copy and is silently lost when the container is recreated."
+    echo
+    echo "So, when a change to \`~/.claude\` is meant to last beyond this container:"
+    echo
+    echo "- Do not work around a read-only mount, and do not report the change as done."
+    echo "- Tell the user which variable would allow it and let them decide, e.g."
+    echo "  \`CLAUDE_BOX_SKILLS=rw claude-box\` for one item, or"
+    echo "  \`CLAUDE_BOX_HOST_CONFIG=rw claude-box\` for all of them. The setting takes"
+    echo "  effect on the next launch, so say so before doing the work."
+    echo "- A skill, subagent or command only this project needs is better placed in"
+    echo "  \`.claude/\` inside the project, which is writable and versioned with the code."
+  } > "$CLAUDE_BOX_NOTES"
+fi
+export CLAUDE_BOX_NOTES
+
 # Prepare the --plugin-dir for loading the box's built-in plugin (the env-request skill).
 # env-request is off by default. The feature is meaningless without a request outbox,
 # so it is loaded only when one is mounted (CLAUDE_BOX_REQUEST_DIR); if unset, --plugin-dir is not
@@ -98,6 +140,7 @@ if [ "${1:-}" = "claude" ]; then
       shift  # drop the leading "claude"
       inject=()
       [ -n "$CLAUDE_BOX_PLUGIN_DIR" ] && inject+=(--plugin-dir "$CLAUDE_BOX_PLUGIN_DIR")
+      [ -n "$CLAUDE_BOX_NOTES" ] && inject+=(--append-system-prompt "$(cat "$CLAUDE_BOX_NOTES")")
       [ -n "${CLAUDE_BOX_BRIDGE_PORT:-}" ] && inject+=(--settings /etc/claude-box/notify-hooks.json)
       set -- claude "${inject[@]}" "$@"
       ;;

@@ -25,3 +25,4 @@ is large enough to stand on its own).
 | [08](08-host-global-settings-import.md) | Import the host's global settings one-way (read-only → merge) |
 | [09](09-import-host-claude-config.md) | Import the host's Claude config by default (skills, instructions, agents, commands) |
 | [10](10-host-config-import-modes.md) | Host config import modes: `rw` by default, `ro`/`off` per item |
+| [11](11-read-only-by-default-and-telling-claude.md) | Read-only by default, and telling claude so it can ask |

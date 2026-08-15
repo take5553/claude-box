@@ -20,10 +20,11 @@
 - **egress は既定拒否・ホスト名で判定**。80/443 は透過リダイレクトでローカルプロキシへ
   強制的に通し、TLS の SNI / HTTP の Host のホワイトリストだけを許可する。TLS は復号しない。
 - 認証情報と履歴は専用ボリュームに永続化し、ホスト側とは分離する。一方でホスト
-  `~/.claude` の**一部**(設定・`skills/`・`agents/`・`commands/`・グローバル
-  `CLAUDE.md`)は持ち込んで普段の Claude と同じ挙動にする。既定は**読み書き共有**で、
-  `CLAUDE_BOX_HOST_CONFIG=ro`(または `off`)にすれば箱からホストへは一切書かせない
-  ([design 10](docs/design/10-host-config-import-modes.md))。
+  `~/.claude` の**一部**(設定・`skills/`・`agents/`・`commands/`・`plugins/`・
+  グローバル `CLAUDE.md`)は持ち込んで普段の Claude と同じ挙動にする。既定は
+  **読み取り専用**で、ホストに残すべき変更があるときは箱の中の Claude が
+  「どの環境変数を付けるか」を提案する
+  ([design 11](docs/design/11-read-only-by-default-and-telling-claude.md))。
 
 **意図的に開けていないもの**(見落としではなく、これが要点)
 
@@ -110,39 +111,45 @@ claude-box claude     # 直接 claude を起動する場合
 コンテナ内では `claude` と打つと YOLO で起動する(`login` / `update` / `mcp` などの
 管理系サブコマンドはフラグなしで素通し)。
 
-### ホストの `~/.claude` は箱に入る — しかもコピーではなく**共有**
+### ホストの `~/.claude` は箱に入る — 既定は読み取り専用
 
 普段の Claude と同じ挙動にするため、ホストの `~/.claude`(`CLAUDE_CONFIG_DIR` を
-設定しているならそちら)の次の項目を持ち込む。**既定は読み書き共有**:
+設定しているならそちら)の次の項目を持ち込む。**中身は全部ある**。既定では、箱から
+ホスト側へ書き戻せないだけ:
 
-| 項目 | 変数 | 既定 |
-|---|---|---|
-| `settings.json`・`settings.local.json` | `CLAUDE_BOX_SETTINGS` | `rw` |
-| `skills/` | `CLAUDE_BOX_SKILLS` | `rw` |
-| `agents/` | `CLAUDE_BOX_AGENTS` | `rw` |
-| `commands/` | `CLAUDE_BOX_COMMANDS` | `rw` |
-| `plugins/`(インストール済みプラグインとマーケットプレイス) | `CLAUDE_BOX_PLUGINS` | `rw` |
-| `CLAUDE.md` | `CLAUDE_BOX_GLOBAL_MD_MODE` | `rw` |
+| 項目 | 変数 | 既定 | |
+|---|---|---|---|
+| `settings.json`・`settings.local.json` | `CLAUDE_BOX_SETTINGS` | `ro` | 箱側のコピーへマージ |
+| `skills/` | `CLAUDE_BOX_SKILLS` | `ro` | |
+| `agents/` | `CLAUDE_BOX_AGENTS` | `ro` | |
+| `commands/` | `CLAUDE_BOX_COMMANDS` | `ro` | |
+| `CLAUDE.md` | `CLAUDE_BOX_GLOBAL_MD_MODE` | `ro` | 毎起動で箱側を置換 |
+| `plugins/`(インストール済みプラグインとマーケットプレイス) | `CLAUDE_BOX_PLUGINS` | **`rw`** | 例外(下記) |
 
-各変数は `rw`(共有)・`ro`(持ち込むが箱からは書けない)・`off`(持ち込まない)。
-`CLAUDE_BOX_HOST_CONFIG` は全項目を一括で指定する。
+各変数は `ro`(持ち込むが箱からは書けない)・`rw`(共有＝箱の書き込みがホストに届く)・
+`off`(持ち込まない)。`CLAUDE_BOX_HOST_CONFIG` は全項目を一括指定するので、
+`CLAUDE_BOX_HOST_CONFIG=rw` で全部共有、`=off` で素の箱になる。
+
+**解禁はその場の判断でできるようにしてある**。箱は起動時のモードを箱の中の Claude に
+伝えるので、コンテナより長生きさせるべき変更が出てきたときに、黙って失うのではなく
+「どの環境変数を付けて入り直すか」を提案する。モードは起動時に決まるので、入り直す:
+
+```sh
+CLAUDE_BOX_SKILLS=rw claude-box       # 箱で書いたスキルを残す
+CLAUDE_BOX_HOST_CONFIG=rw claude-box  # 全部共有する
+```
 
 > [!IMPORTANT]
-> **`rw` は「箱がホストのファイルを書き換える」ということ。** 箱で書いたスキルや設定が
-> 残るのはこのおかげだが、箱は YOLO で動いていて、そのファイルは後で**ホストの**
-> Claude Code が読む — `settings.json` に足された hook や `skills/` に置かれた
-> スキルは、後で**ホスト側で実行される**。箱の影響がホストに届く唯一の経路。
->
-> - `CLAUDE_BOX_HOST_CONFIG=ro` — 全部継承するが、書き戻しは一切させない
-> - `CLAUDE_BOX_HOST_CONFIG=off` — 何も持ち込まない素の箱
-> - 項目別なら `CLAUDE_BOX_SETTINGS=ro`、`CLAUDE_BOX_SKILLS=off` など
->
-> `~/.claude` をバージョン管理下に置く(またはセッション後に diff を見る)のが、
-> 何が返ってきたかを把握する一番安いやり方。
+> **`plugins/` だけは既定で読み書き共有**にしている。ホストで有効にしたプラグイン
+> (たとえば公開されているセキュリティプラグイン)が箱の中で黙って効かない方が、
+> リスクより問題だと判断したため。加えて Claude Code はこのディレクトリに通常運転で
+> 書き込む。つまりここが、YOLO で動く箱が**ホストの** Claude Code に後で読ませる
+> ものを置ける唯一の経路になる。避けたいなら `CLAUDE_BOX_PLUGINS=ro` か `off`。
+> いずれにせよ `~/.claude` をバージョン管理下に置いておくと何が返ってきたか見える。
 
 マウントするのはホスト側に**既に在るパスだけ**で、ホストには何も作らない。
 **認証情報・履歴・セッション状態は共有しない**(箱専用ボリュームに留まる)。理由は
-[design 10](docs/design/10-host-config-import-modes.md)。
+[design 11](docs/design/11-read-only-by-default-and-telling-claude.md)。
 
 ### 環境変数
 
@@ -155,10 +162,11 @@ claude-box claude     # 直接 claude を起動する場合
 | `CLAUDE_BOX_IMAGE` | 使用するイメージ。既定 `claude-box:latest` |
 | `CLAUDE_BOX_NESTED_CONTAINERS=1` | コンテナ内 rootless Podman を有効化(緩和を付与)。**既定 off**(→ セキュリティモデル節) |
 | `CLAUDE_BOX_NO_GITCONFIG=1` | `~/.gitconfig` のマウントを無効化(壊れやすい設定の回避) |
-| `CLAUDE_BOX_HOST_CONFIG` | ホスト `~/.claude` の持ち込み方を**一括**指定: `rw` / `ro` / `off`([上の節](#ホストの-claude-は箱に入る--しかもコピーではなく共有))。項目別変数が優先 |
-| `CLAUDE_BOX_SETTINGS` | `settings.json` / `settings.local.json` のモード。既定 `rw`。`ro` なら箱側のコピーへマージする方式 |
-| `CLAUDE_BOX_SKILLS` / `CLAUDE_BOX_AGENTS` / `CLAUDE_BOX_COMMANDS` / `CLAUDE_BOX_PLUGINS` | `~/.claude/skills` / `agents` / `commands` / `plugins` のモード。既定 `rw` |
-| `CLAUDE_BOX_GLOBAL_MD_MODE` | グローバル `CLAUDE.md` のモード。既定 `rw`。`ro` なら共有せず、ホストのファイルで箱側を毎起動置換する |
+| `CLAUDE_BOX_HOST_CONFIG` | ホスト `~/.claude` の持ち込み方を**一括**指定: `ro` / `rw` / `off`([上の節](#ホストの-claude-は箱に入る--既定は読み取り専用))。項目別変数が優先 |
+| `CLAUDE_BOX_SETTINGS` | `settings.json` / `settings.local.json` のモード。既定 `ro`(箱側のコピーへマージ)。`rw` ならホストのファイルを共有 |
+| `CLAUDE_BOX_SKILLS` / `CLAUDE_BOX_AGENTS` / `CLAUDE_BOX_COMMANDS` | `~/.claude/skills` / `agents` / `commands` のモード。既定 `ro` |
+| `CLAUDE_BOX_PLUGINS` | `~/.claude/plugins` のモード。既定 **`rw`**(ホストで有効にしたプラグインを箱でも動かすため) |
+| `CLAUDE_BOX_GLOBAL_MD_MODE` | グローバル `CLAUDE.md` のモード。既定 `ro`(ホストのファイルで箱側を毎起動置換)。`rw` なら共有 |
 | `CLAUDE_BOX_REQUEST_DIR` | env-request の outbox にするホストフォルダ。**既定 on**(`~/.claude-box/requests`)。置き場を変えたいとき指定 |
 | `CLAUDE_BOX_NO_REQUEST_DIR=1` | env-request の outbox を無効化(既定 on) |
 | `EXTRA_ALLOW_DOMAINS` | egress 許可先を**追加**する(コアは常に含む。スペース区切り) |
@@ -180,9 +188,9 @@ claude-box() {
   # 箱の中で docker / compose を使うときだけ(サンドボックスの緩和が付く)
   # local -x CLAUDE_BOX_NESTED_CONTAINERS="${CLAUDE_BOX_NESTED_CONTAINERS:-1}"
 
-  # ~/.claude は既定で読み書き共有。箱から一切書き戻させたくないなら外す
+  # ~/.claude は既定で読み取り専用。箱の書き込みをホストに反映させたいなら外す
   # (上の「ホストの ~/.claude は箱に入る」節を参照)
-  # local -x CLAUDE_BOX_HOST_CONFIG="${CLAUDE_BOX_HOST_CONFIG:-ro}"
+  # local -x CLAUDE_BOX_HOST_CONFIG="${CLAUDE_BOX_HOST_CONFIG:-rw}"
 
   # スキルを ~/.claude/skills ではなく専用リポジトリで持っている場合
   # local -x CLAUDE_SKILLS_DIR="${CLAUDE_SKILLS_DIR:-$HOME/dev/my-skills}"
@@ -215,9 +223,11 @@ claude-box` はラッパーの値より優先される。とくに `GH_TOKEN` �
 | カレントプロジェクト | **ホストと同じ絶対パス**(例 `/home/you/project`) | 常時・読み書き。Claude Code はカレントパスをキーに履歴を保存するため、固定 `/workspace` だと全プロジェクトの履歴が混ざる。**同じパスに見えるのはこのためで、ホームがマウントされているわけではない** |
 | 認証・設定ボリューム | `/home/node/.claude` | 常時。ホストの `~/.claude` とは**別**の専用ボリューム |
 | `~/.gitconfig` | `/home/node/.gitconfig`(ro) | ファイルが在るときだけ。`CLAUDE_BOX_NO_GITCONFIG=1` で無効化 |
-| `~/.claude/settings.json`・`settings.local.json` | `/home/node/.claude/` (**rw** 共有) | 在るファイルだけ**既定 on**。箱での `/config` や権限変更はホストのファイルに直接書かれる。`CLAUDE_BOX_SETTINGS=ro` なら `/etc/claude-box/host-settings*.json` に ro マウントし箱側コピーへマージ([design 08](docs/design/08-host-global-settings-import.md)) |
-| `~/.claude/skills`・`agents`・`commands`・`plugins` | `/home/node/.claude` 配下の同名パス(**rw** 共有) | 在るディレクトリだけ**既定 on**。箱で書いたスキル・サブエージェント・コマンド・入れたプラグインがホストに残る = 箱がホストへ書ける経路([design 10](docs/design/10-host-config-import-modes.md))。`CLAUDE_SKILLS_DIR` で skills の場所を差し替え |
-| グローバル `CLAUDE.md` | `/home/node/.claude/CLAUDE.md`(**rw** 共有) | ファイルが在れば**既定 on**。`CLAUDE_BOX_GLOBAL_MD_MODE=ro` なら `/etc/claude-box/global-CLAUDE.md`(ro)に置いて箱側を毎起動置換する方式になる。`CLAUDE_BOX_GLOBAL_MD` で元ファイルを差し替え |
+| `~/.claude/settings.json`・`settings.local.json` | `/etc/claude-box/host-settings*.json`(ro)→ `/home/node/.claude/` へマージ | 在るファイルだけ**既定 on**。箱側のコピーは書き換えられるがホストには届かない([design 08](docs/design/08-host-global-settings-import.md))。`CLAUDE_BOX_SETTINGS=rw` ならホストのファイルを直接マウント |
+| `~/.claude/skills`・`agents`・`commands` | `/home/node/.claude` 配下の同名パス(ro) | 在るディレクトリだけ**既定 on**。箱の中で書こうとすると失敗するので、必要なら `CLAUDE_BOX_SKILLS=rw` 等で入り直す。`CLAUDE_SKILLS_DIR` で skills の場所を差し替え |
+| `~/.claude/plugins` | `/home/node/.claude/plugins`(**rw** 共有) | 在れば**既定 on**。ホストで有効にしたプラグインを動かすため rw = 箱がホストへ書ける唯一の経路([design 11](docs/design/11-read-only-by-default-and-telling-claude.md)) |
+| グローバル `CLAUDE.md` | `/etc/claude-box/global-CLAUDE.md`(ro)→ `/home/node/.claude/CLAUDE.md` を**置換** | ファイルが在れば**既定 on**。毎起動で置換するので箱の中での編集は残らない(`CLAUDE_BOX_GLOBAL_MD_MODE=rw` なら共有)。`CLAUDE_BOX_GLOBAL_MD` で元ファイルを差し替え |
+| 持ち込みモードと箱からの注意書き | `CLAUDE_BOX_MODES` → `claude` のシステムプロンプトへ追記 | 常時。箱の中の Claude が「この変更はホストに届かない/どの変数を付ければ届く」を知るための経路([design 11](docs/design/11-read-only-by-default-and-telling-claude.md)) |
 | コンテナ用ボリューム | `/home/node/.local/share/containers` | `CLAUDE_BOX_NESTED_CONTAINERS=1` のときだけ |
 | 要望の outbox | `/home/node/.claude-box/requests` | **既定 on**(ホスト `~/.claude-box/requests`・読み書き)。`CLAUDE_BOX_NO_REQUEST_DIR=1` で無効化 |
 
@@ -294,10 +304,17 @@ Linux ホストで AppArmor が有効なら `--security-opt apparmor=unconfined`
 `settings.json` から外す。`CLAUDE_BOX_SETTINGS=ro` なら箱側のコピーは書き換え可能で
 ホストには波及しないので、箱の中で直して使う手もある。
 
-**箱の中で設定変更が保存できない** — 既定の `CLAUDE_BOX_SETTINGS=rw` ではホストの
+**箱で変えた設定やスキルがホストに無い** — それが既定の挙動。持ち込みは読み取り専用で、
+`~/.claude/skills`・`agents`・`commands` は書き込みが失敗し、`settings.json` と
+`CLAUDE.md` は箱側のコピーなのでコンテナと一緒に消える。残したいときは対応する変数
+(`CLAUDE_BOX_SETTINGS=rw`・`CLAUDE_BOX_SKILLS=rw`・`CLAUDE_BOX_HOST_CONFIG=rw`)を
+付けて入り直す。箱の中の Claude はこれを提案するよう指示されている
+([design 11](docs/design/11-read-only-by-default-and-telling-claude.md))。
+
+**`CLAUDE_BOX_SETTINGS=rw` にすると箱の中で設定変更が保存できない** — ホストの
 `settings.json` を*ファイル*として bind mount するため、`claude` は rename ではなく
 インプレース書き込みのフォールバック経路で保存する。将来そのフォールバックが無くなった
-場合は `CLAUDE_BOX_SETTINGS=ro`(箱が自分のコピーを持つ)にする
+場合は `CLAUDE_BOX_SETTINGS=ro`(箱が自分のコピーを持つ)に戻す
 ([design 10](docs/design/10-host-config-import-modes.md))。
 
 **箱の中で git が失敗する** — マウントした `~/.gitconfig` が、コンテナ内で解決できない

@@ -27,18 +27,21 @@ with the host Claude's.
   **Superseded by [09](09-import-host-claude-config.md)**: the global `CLAUDE.md` is
   now imported by default (from the host's `~/.claude/CLAUDE.md`, or the file named
   by `CLAUDE_BOX_GLOBAL_MD`) and **replaces** the box's copy instead of being
-  appended to it, so a rule deleted on the host no longer lingers in the box —
-  and since [10](10-host-config-import-modes.md) it is shared read-write by
-  default, with the replace behaviour available as `CLAUDE_BOX_GLOBAL_MD_MODE=ro`.
+  appended to it, so a rule deleted on the host no longer lingers in the box.
+  ([10](10-host-config-import-modes.md) briefly made the file shared read-write by
+  default; [11](11-read-only-by-default-and-telling-claude.md) put the replace
+  behaviour back as the default, with sharing available as
+  `CLAUDE_BOX_GLOBAL_MD_MODE=rw`.)
 - The default notification channel (`preferredNotifChannel`) is written **only
   when the key is unset**, so a manual change is not overwritten.
 - Named items of the host's `~/.claude` are the exception to "nothing from the
   host's `~/.claude`": settings, `skills/`, `agents/`, `commands/`, `plugins/` and
-  `CLAUDE.md` are imported on every launch, shared read-write by default
+  `CLAUDE.md` are imported on every launch — read-only by default, `plugins/` aside
   ([08](08-host-global-settings-import.md),
   [09](09-import-host-claude-config.md),
-  [10](10-host-config-import-modes.md)). Credentials, history and per-project state
-  are not among them and stay in the volume.
+  [10](10-host-config-import-modes.md),
+  [11](11-read-only-by-default-and-telling-claude.md)). Credentials, history and
+  per-project state are not among them and stay in the volume.
 
 ## Consequences
 
@@ -46,9 +49,8 @@ with the host Claude's.
 
 - Even with disposable containers, you log in once.
 - State is physically separated from the host: credentials, history and session
-  state never leave the volume. The *config* items above are shared on purpose —
-  `CLAUDE_BOX_HOST_CONFIG=ro` keeps even those from flowing back
-  ([10](10-host-config-import-modes.md)).
+  state never leave the volume, and the *config* items above do not flow back either
+  unless you ask for it ([11](11-read-only-by-default-and-telling-claude.md)).
 - Idempotent init is safe to re-run (tolerant of re-execution).
 
 ### Trade-offs and notes
