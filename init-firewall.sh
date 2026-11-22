@@ -67,6 +67,12 @@ downloads.claude.ai
 #   github : gh / git operations. codeload is in none of the meta ranges, so
 #            under the old IP scheme github would pass while codeload alone was
 #            blocked (made explicit by hostname judgment, approved in request #1).
+#            results-receiver.actions.githubusercontent.com: the API now 302s
+#            Actions run/job log downloads (`gh run view --log[-failed]`) here
+#            before the blob storage below. Without it, failures that cannot be
+#            reproduced locally (e.g. the Dependabot updater) are opaque. GET
+#            only, same data api.github.com already gates (env-request
+#            2026-11-22).
 #   pkgs   : npm / PyPI package fetches.
 #   nested : base image pull for in-container Podman, plus apt/apk
 #            (CLAUDE_BOX_NESTED_CONTAINERS).
@@ -84,6 +90,7 @@ api.github.com
 codeload.github.com
 uploads.github.com
 objects.githubusercontent.com
+results-receiver.actions.githubusercontent.com
 raw.githubusercontent.com
 registry.npmjs.org
 pypi.org

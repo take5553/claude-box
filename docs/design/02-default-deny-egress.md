@@ -102,7 +102,9 @@ environment variables — must pass a hostname-shape check before it reaches the
 nginx config (injection guard); duplicates are de-duplicated (nginx map keys must
 be unique). GitHub's log artifacts live on Azure Blob, allowed by the narrow
 pattern `productionresultssa[0-9]+\.blob\.core\.windows\.net` rather than opening
-`*.blob.core.windows.net`.
+`*.blob.core.windows.net`. The API reaches that storage through
+`results-receiver.actions.githubusercontent.com` (an exact host in the GitHub
+group), so both are needed for `gh run view --log` to work.
 
 ### Startup self-check
 
