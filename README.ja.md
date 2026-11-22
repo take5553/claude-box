@@ -130,6 +130,13 @@ claude-box claude     # 直接 claude を起動する場合
 `off`(持ち込まない)。`CLAUDE_BOX_HOST_CONFIG` は全項目を一括指定するので、
 `CLAUDE_BOX_HOST_CONFIG=rw` で全部共有、`=off` で素の箱になる。
 
+> [!NOTE]
+> **Linux** ホストでは、`rw` の書き込みはホストのユーザーが **uid 1000** のときだけ
+> 動く。箱は `node`(uid 1000)で動き、bind mount はファイルの持ち主をそのまま見せる
+> ため。別の uid だと rw の取り込み(既定 rw の `plugins/` も含む)は読めるが、書き込みは
+> `Permission denied` で失敗する。起動時に警告が出る。macOS(Docker Desktop)は影響
+> なし。[design 10](docs/design/10-host-config-import-modes.md) 参照。
+
 **解禁はその場の判断でできるようにしてある**。箱は起動時のモードを箱の中の Claude に
 伝えるので、コンテナより長生きさせるべき変更が出てきたときに、黙って失うのではなく
 「どの環境変数を付けて入り直すか」を提案する。モードは起動時に決まるので、入り直す:

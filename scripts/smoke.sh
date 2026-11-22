@@ -121,6 +121,12 @@ echo "[7/7] host config in rw mode (opt-in, and the plugins default): writes rea
 # (design 10). If this step ever fails, rw settings are broken and ro is the fallback
 # -- and since plugins/ is rw by default (design 11), so is that import.
 printf '{"model":"from-host"}\n' > "$HOSTCFG_TMP/rw-settings.json"
+# rw is supported when the host user and the box's node share a uid (1000): a bind
+# mount keeps host ownership, so on a Linux runner (uid 1001) the box could not
+# write a 644 file at all and this would test the uid mismatch instead of the
+# rename/in-place mechanics. Make the file writable to model the supported setup;
+# the mismatch itself is a documented limitation the launcher warns about (design 10).
+chmod a+rw "$HOSTCFG_TMP/rw-settings.json"
 rw_out="$("$ENGINE" run --rm "${FIREWALL_CAPS[@]}" \
             -v "$HOSTCFG_TMP/rw-settings.json:/home/node/.claude/settings.json" \
             "$IMAGE" sh -c '

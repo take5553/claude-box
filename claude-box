@@ -191,6 +191,22 @@ fi
 # will not reach the host, and can name the variable that would let it (design 11).
 MODES_ENV=(-e "CLAUDE_BOX_MODES=$MODES_SUMMARY")
 
+# rw on a Linux host whose user is not uid 1000. A bind mount keeps the host's
+# ownership as is, and the box runs as node (uid 1000), so the box can read the
+# shared files but writing them fails with "Permission denied". Docker Desktop on
+# macOS translates ownership, and a typical Linux desktop's first user is uid 1000,
+# so neither is affected. Warn rather than silently switch to ro: the mode is the
+# user's choice, and design 10 records the limitation.
+if [ "$(uname -s)" = "Linux" ] && [ "$(id -u)" != "1000" ]; then
+  rw_items=""
+  for kv in $MODES_SUMMARY; do
+    [ "${kv#*=}" = "rw" ] && rw_items="${rw_items}${rw_items:+ }${kv%=*}"
+  done
+  if [ -n "$rw_items" ]; then
+    echo "claude-box: WARN: your uid is $(id -u), the box runs as uid 1000; writes from the box to rw imports will fail with Permission denied ($rw_items). Set them to ro if you do not need writes (design 10)." >&2
+  fi
+fi
+
 # Only when you want to allow GitHub operations (push / PR / issue / merge),
 # pass a scope-limited, short-lived token *at runtime only* (never stored).
 #   GH_TOKEN="$(security find-generic-password -s claude-box-gh -w)" claude-box

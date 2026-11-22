@@ -135,6 +135,13 @@ Each variable takes `ro` (bring it in, but the box cannot change your copy), `rw
 `CLAUDE_BOX_HOST_CONFIG` sets all of them at once, so `CLAUDE_BOX_HOST_CONFIG=rw` is
 "share everything" and `=off` is a pristine box.
 
+> [!NOTE]
+> On a **Linux** host, `rw` writes only work when your uid is **1000** — the box runs
+> as `node` (uid 1000) and a bind mount keeps your files' ownership. With another uid
+> the box can read rw imports (including `plugins/`, rw by default) but writing them
+> fails with `Permission denied`; the launcher warns at startup. macOS (Docker Desktop)
+> is not affected. See [design 10](docs/design/10-host-config-import-modes.md).
+
 **Unlocking it is meant to be a decision you make in the moment**, not homework: the
 box tells the in-box Claude which modes it was launched with, so when a change needs to
 outlive the container it says which variable to set rather than losing the work

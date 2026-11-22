@@ -98,6 +98,17 @@ drops that fallback.
 
 ### Trade-offs and notes
 
+- **rw needs the host user's uid to match the box's (`node`, uid 1000).** A bind
+  mount keeps host ownership, so on a Linux host whose user has another uid (e.g. a
+  CI runner at 1001, or a second account) the box can read rw imports but writes fail
+  with `Permission denied` — `plugins`, rw by default, included. Docker Desktop on
+  macOS translates ownership and a Linux desktop's first user is uid 1000, so the
+  common cases are unaffected. The launcher warns at startup when it detects the
+  mismatch with any rw item; it does not switch to `ro` on its own, since the mode is
+  the user's choice. Remapping uids (idmapped mounts, `--userns`) was left out: it
+  changes the isolation model ([01](01-isolation-model.md)) and deserves its own note.
+  Found when the smoke test's rw step first ran on a GitHub Actions runner.
+
 - **The default now lets the box write the host's Claude config.** This amends the
   central decision of [08](08-host-global-settings-import.md), which mounted
   settings read-only precisely so a box running YOLO ([04](04-yolo-by-default.md))
