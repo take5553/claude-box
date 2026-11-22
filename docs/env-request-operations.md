@@ -79,3 +79,42 @@ outbox as untrusted input** — this review is the box's control point.
   your convention).
 ```
 
+
+## Replying (maintainer → the Claude inside the box)
+
+So that you only have to tell the in-box Claude "the request was handled, check the
+reply", write the outcome as a **reply file** in the reply folder
+(`~/.claude-box/replies`, or `CLAUDE_BOX_REPLY_DIR`). The box sees it **read-only**; it
+is deliberately not the outbox, which every box can write
+([design 12](design/12-env-request-replies.md)).
+
+- **Name it after the request**: same filename as the request it answers
+  (`20261122T063517Z-egress-allow-....md`).
+- **Start with front matter** — the in-box skill finds replies for its project by the
+  exact `project:` line, so copy it from the request's provenance footer:
+
+  ```markdown
+  ---
+  request: 20261122T063517Z-egress-allow-cdn-playwright-dev-for-playwright-browser-downloads.md
+  project: /Users/you/dev/app
+  status: approved | partially-approved | declined
+  date: 2026-11-22
+  ---
+
+  ## Decision
+  (what was approved / declined, and why — in terms the requester can act on)
+
+  ## What changed in the box
+  (allow-list entry, rebuilt image + versions, commit/branch; or "nothing")
+
+  ## What you should do next
+  (e.g. bump a pin; "takes effect in a new box — the user will restart it")
+  ```
+
+- **Say when it takes effect.** Firewall and image changes only apply to a box started
+  after the rebuild; say so, so the in-box Claude can check and ask for a restart rather
+  than work around it.
+- Write only what you would say to the requester: the reply is read by an agent that
+  acts on it, so keep it to decisions and next steps, not raw logs or secrets.
+- A host-side Claude helping you review may write the reply too; it is the same
+  "propose on the host, decide as the maintainer" step as above.

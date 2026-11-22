@@ -210,6 +210,27 @@ if [ -z "${CLAUDE_BOX_NO_REQUEST_DIR:-}" ]; then
   mkdir -p "$REQUEST_DIR"
   REQUEST_DIR_MOUNT=(-v "$REQUEST_DIR:/home/node/.claude-box/requests")
   REQUEST_DIR_ENV=(-e "CLAUDE_BOX_REQUEST_DIR=/home/node/.claude-box/requests")
+
+  # The return channel: the maintainer's replies to those requests (design 12).
+  # Mounted READ-ONLY and kept apart from the outbox on purpose: every box shares the
+  # outbox read-write, so a reply placed there could be forged by any (possibly
+  # injected) box and then trusted by another project's Claude. Read-only makes the
+  # maintainer, on the host, the only writer. Defaults to ~/.claude-box/replies;
+  # relocate with CLAUDE_BOX_REPLY_DIR. Off together with the outbox.
+  REPLY_DIR="${CLAUDE_BOX_REPLY_DIR:-$HOME/.claude-box/replies}"
+  mkdir -p "$REPLY_DIR"
+  # If one folder sat inside the other, the box could write replies through the
+  # read-write outbox mount and the :ro below would protect nothing. Refuse.
+  req_real="$(cd "$REQUEST_DIR" && pwd -P)"
+  rep_real="$(cd "$REPLY_DIR" && pwd -P)"
+  case "$rep_real/" in "$req_real"/*) overlap=1 ;; *) overlap="" ;; esac
+  case "$req_real/" in "$rep_real"/*) overlap=1 ;; esac
+  if [ -n "$overlap" ]; then
+    echo "claude-box: CLAUDE_BOX_REPLY_DIR ($rep_real) and CLAUDE_BOX_REQUEST_DIR ($req_real) must not contain each other" >&2
+    exit 2
+  fi
+  REQUEST_DIR_MOUNT+=(-v "$REPLY_DIR:/home/node/.claude-box/replies:ro")
+  REQUEST_DIR_ENV+=(-e "CLAUDE_BOX_REPLY_DIR=/home/node/.claude-box/replies")
 fi
 
 # Normalize terminal colors (avoid color mismatches on terminals lacking terminfo)

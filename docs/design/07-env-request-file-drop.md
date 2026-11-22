@@ -67,3 +67,7 @@ for the common solo/fork workflow, the file drop is self-contained.
   with `CLAUDE_BOX_NO_REQUEST_DIR=1` if you do not want it.
 - No built-in queue, discussion, or status labels — adopt a file convention (e.g. move
   handled requests to a `done/` subfolder).
+- As decided here the channel is one-way: the maintainer cannot answer the in-box
+  Claude, so outcomes have to be relayed by hand. Extended by
+  [12 — env-request replies](12-env-request-replies.md) with a separate, read-only
+  reply folder.

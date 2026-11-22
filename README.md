@@ -176,7 +176,8 @@ own volume. The reasoning is in
 | `CLAUDE_BOX_PLUGINS` | Mode for `~/.claude/plugins`. Default **`rw`**, so a plugin enabled on the host works in the box. |
 | `CLAUDE_BOX_GLOBAL_MD_MODE` | Mode for the global `CLAUDE.md`. Default `ro` (the host's file replaces the box's copy at startup); `rw` shares the file. |
 | `CLAUDE_BOX_REQUEST_DIR` | Host folder for the env-request outbox. **On by default** (`~/.claude-box/requests`); set this to relocate it. |
-| `CLAUDE_BOX_NO_REQUEST_DIR=1` | Turn off the env-request outbox (on by default). |
+| `CLAUDE_BOX_REPLY_DIR` | Host folder where the maintainer writes replies to requests (default `~/.claude-box/replies`, mounted **read-only**). Must not overlap the outbox. |
+| `CLAUDE_BOX_NO_REQUEST_DIR=1` | Turn off the env-request outbox and reply folder (on by default). |
 | `EXTRA_ALLOW_DOMAINS` | **Add** egress destinations (core always included; space-separated). |
 | `ALLOW_DOMAINS` | Replace the optional egress list wholesale (space-separated; **core is always kept**). |
 | `SKIP_FIREWALL=1` | Disable the firewall entirely (**unrestricted egress**; prints a warning). |
@@ -241,6 +242,7 @@ Only these host resources enter the box. **The home directory is not mounted.**
 | Import modes + the box's own note | `CLAUDE_BOX_MODES` → a note appended to `claude`'s system prompt | always. How the in-box Claude knows a `~/.claude` change will not reach you, and which variable would let it ([design 11](docs/design/11-read-only-by-default-and-telling-claude.md)). |
 | Containers volume | `/home/node/.local/share/containers` | only if `CLAUDE_BOX_NESTED_CONTAINERS=1`. |
 | Request outbox | `/home/node/.claude-box/requests` | **default on** (host `~/.claude-box/requests`, read-write); disable with `CLAUDE_BOX_NO_REQUEST_DIR=1`. |
+| Request replies | `/home/node/.claude-box/replies` | with the outbox (host `~/.claude-box/replies`, **read-only**): the maintainer's answers ([design 12](docs/design/12-env-request-replies.md)). |
 
 Launching from `$HOME` or `/` is refused, so nothing broad is exposed by accident.
 
@@ -253,7 +255,9 @@ Two extra features — cmux is opt-in, env-request is on by default:
   [`contrib/cmux/`](contrib/cmux/).
 - **Environment requests (`env-request`)** — **on by default**: the in-box Claude drops
   "change this box's environment" requests as files (into `~/.claude-box/requests`) for a
-  maintainer to review on the host (no GitHub, no network). Relocate with
+  maintainer to review on the host (no GitHub, no network). The maintainer answers in
+  a read-only reply folder, so telling the in-box Claude "the request was handled, check
+  the reply" is enough. Relocate with
   `CLAUDE_BOX_REQUEST_DIR` or disable with `CLAUDE_BOX_NO_REQUEST_DIR=1`; see
   [`docs/env-request-operations.md`](docs/env-request-operations.md).
 

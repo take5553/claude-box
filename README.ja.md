@@ -168,7 +168,8 @@ CLAUDE_BOX_HOST_CONFIG=rw claude-box  # 全部共有する
 | `CLAUDE_BOX_PLUGINS` | `~/.claude/plugins` のモード。既定 **`rw`**(ホストで有効にしたプラグインを箱でも動かすため) |
 | `CLAUDE_BOX_GLOBAL_MD_MODE` | グローバル `CLAUDE.md` のモード。既定 `ro`(ホストのファイルで箱側を毎起動置換)。`rw` なら共有 |
 | `CLAUDE_BOX_REQUEST_DIR` | env-request の outbox にするホストフォルダ。**既定 on**(`~/.claude-box/requests`)。置き場を変えたいとき指定 |
-| `CLAUDE_BOX_NO_REQUEST_DIR=1` | env-request の outbox を無効化(既定 on) |
+| `CLAUDE_BOX_REPLY_DIR` | 要望への返答をメンテナが書くホストフォルダ(既定 `~/.claude-box/replies`、**読み取り専用**でマウント)。outbox と重ねてはいけない |
+| `CLAUDE_BOX_NO_REQUEST_DIR=1` | env-request の outbox と返答フォルダを無効化(既定 on) |
 | `EXTRA_ALLOW_DOMAINS` | egress 許可先を**追加**する(コアは常に含む。スペース区切り) |
 | `ALLOW_DOMAINS` | egress 許可リストを丸ごと上書き(スペース区切り。**コアは常に残る**) |
 | `SKIP_FIREWALL=1` | ファイアウォールを無効化(**egress 無制限**。警告表示あり) |
@@ -230,6 +231,7 @@ claude-box` はラッパーの値より優先される。とくに `GH_TOKEN` �
 | 持ち込みモードと箱からの注意書き | `CLAUDE_BOX_MODES` → `claude` のシステムプロンプトへ追記 | 常時。箱の中の Claude が「この変更はホストに届かない/どの変数を付ければ届く」を知るための経路([design 11](docs/design/11-read-only-by-default-and-telling-claude.md)) |
 | コンテナ用ボリューム | `/home/node/.local/share/containers` | `CLAUDE_BOX_NESTED_CONTAINERS=1` のときだけ |
 | 要望の outbox | `/home/node/.claude-box/requests` | **既定 on**(ホスト `~/.claude-box/requests`・読み書き)。`CLAUDE_BOX_NO_REQUEST_DIR=1` で無効化 |
+| 要望への返答 | `/home/node/.claude-box/replies` | outbox と一緒に有効(ホスト `~/.claude-box/replies`・**読み取り専用**)。メンテナからの返答([design 12](docs/design/12-env-request-replies.md)) |
 
 `$HOME` や `/` からの起動は拒否する(誤って広くマウントしないため)。
 
@@ -242,7 +244,9 @@ cmux は opt-in、env-request は既定 on:
   [`contrib/cmux/`](contrib/cmux/) 参照。
 - **環境への要望(`env-request`)** — **既定 on**: 箱の中の Claude が「この箱の環境を
   変えたい」という要望を**ファイル**として outbox(`~/.claude-box/requests`)に落とし、
-  ホスト側の環境保守担当が確認する(GitHub もネットワークも使わない)。置き場は
+  ホスト側の環境保守担当が確認する(GitHub もネットワークも使わない)。保守担当は
+  読み取り専用の返答フォルダに返事を書くので、箱の中の Claude には「要望が対応され
+  ました。返答を確認してください」と伝えるだけでよい。置き場は
   `CLAUDE_BOX_REQUEST_DIR` で変更、`CLAUDE_BOX_NO_REQUEST_DIR=1` で無効化。
   [`docs/env-request-operations.md`](docs/env-request-operations.md) 参照。
 
