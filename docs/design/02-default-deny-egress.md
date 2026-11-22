@@ -35,6 +35,14 @@ layers.
      control the subject can `unset` is not a control.
    - IPv6 is not covered by the redirect, so `ip6tables` drops everything except
      DNS to keep it from being an open path.
+   - The backend (`iptables-legacy` or `iptables-nft`) is chosen **at startup**
+     from what the running kernel supports: legacy where its tables still exist
+     (unchanged on Docker Desktop), otherwise nft; neither → abort. A build-time
+     choice cannot know the host kernel, and newer kernels (Ubuntu 26.04, the
+     GitHub Actions runner since late 2026) dropped legacy iptables, so a
+     legacy-only box failed to start there. `ip6tables` goes through the same
+     backend; left on legacy, the IPv6 close-off would only have warned and
+     continued.
 
 2. **nginx (the layer that decides)**
    - 443: `ssl_preread` reads the **SNI** from the TLS ClientHello and matches it

@@ -187,6 +187,31 @@ fi
 
 PROXY_UID="$(id -u "$PROXY_USER")"
 
+# Pick the iptables backend the *running kernel* supports. The image's
+# alternatives point at legacy (Dockerfile), but that choice is made at build
+# time; newer kernels (e.g. Ubuntu 26.04) no longer provide the legacy
+# ip_tables tables, and every legacy call then fails with "Table does not
+# exist". Prefer legacy where it works (unchanged behaviour on Docker Desktop),
+# otherwise nft. Both the IPv4 and IPv6 commands go through the chosen backend:
+# ip6tables follows the same alternative, so leaving it on legacy would let the
+# IPv6 close-off below fail silently. Neither works -> abort (fail-closed).
+IPT_BACKEND=""
+for b in legacy nft; do
+  if command -v "iptables-$b" >/dev/null 2>&1 \
+     && "iptables-$b" -t filter -S >/dev/null 2>&1 \
+     && "iptables-$b" -t nat -S >/dev/null 2>&1; then
+    IPT_BACKEND="$b"
+    break
+  fi
+done
+if [ -z "$IPT_BACKEND" ]; then
+  echo "[firewall] ERROR: neither iptables-legacy nor iptables-nft works on this kernel. Aborting" >&2
+  exit 1
+fi
+iptables()  { "iptables-$IPT_BACKEND" "$@"; }
+ip6tables() { "ip6tables-$IPT_BACKEND" "$@"; }
+echo "[firewall] iptables backend: $IPT_BACKEND"
+
 echo "[firewall] resetting..."
 iptables -F
 iptables -X 2>/dev/null || true
@@ -253,7 +278,7 @@ iptables -P OUTPUT DROP
 
 # IPv6 is not covered by the transparent redirect, so close it off to avoid
 # letting traffic through (keep only DNS, in case resolv.conf is v6).
-if command -v ip6tables >/dev/null 2>&1; then
+if command -v "ip6tables-$IPT_BACKEND" >/dev/null 2>&1; then
   ip6tables -F 2>/dev/null || true
   ip6tables -A OUTPUT -o lo -j ACCEPT 2>/dev/null || true
   ip6tables -A OUTPUT -p udp --dport 53 -j ACCEPT 2>/dev/null || true

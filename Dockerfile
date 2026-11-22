@@ -100,9 +100,10 @@ RUN if [ "$WITH_PODMAN" = "1" ]; then \
 # Make editor launches (e.g. git commit) use vim
 ENV EDITOR=vim
 
-# trixie leans toward nftables. If legacy is unavailable, it auto-falls back to
-# nft (swallowed by || true). The firewall uses conntrack matches so it works
-# under nft too.
+# Default the alternatives to legacy. This only sets what a bare `iptables`
+# means; it cannot know the kernel the box will run on. init-firewall.sh picks
+# the backend at startup (legacy if the kernel still has its tables, else nft),
+# so hosts whose kernels dropped legacy iptables (e.g. Ubuntu 26.04) work too.
 RUN update-alternatives --set iptables /usr/sbin/iptables-legacy || true
 
 # Install the GitHub CLI (gh) from the release binaries.
