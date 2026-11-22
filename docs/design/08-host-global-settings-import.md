@@ -1,0 +1,89 @@
+# 08 — Import the host's global settings one-way (read-only → merge)
+
+> **Amended by [10](10-host-config-import-modes.md).** What this note decided is now
+> the **`ro` mode** for settings, and it is no longer the default: settings are
+> shared read-write with the host unless you ask for `ro`. The mechanism below
+> (read-only mount at a dedicated path, jq merge into the box's copy) is unchanged
+> and still what `ro` does — but read [10](10-host-config-import-modes.md) for what
+> the box does by default, and why the write direction this note closes was later
+> opened deliberately.
+
+Related: [03 — persistent auth and state](03-persistent-auth-state.md),
+[01 — isolation model](01-isolation-model.md),
+[04 — YOLO by default](04-yolo-by-default.md),
+[09 — importing the rest of the host's Claude config](09-import-host-claude-config.md)
+(which extends this to skills, instructions, agents and commands),
+[10 — import modes](10-host-config-import-modes.md) (which makes the write direction
+this note closes a choice, open by default)
+
+## Context
+
+The box keeps its Claude Code state in a dedicated volume, deliberately separate
+from the host's `~/.claude` ([03](03-persistent-auth-state.md)). That separation is
+right for credentials and history, but it also means the settings you have tuned on
+the host — model, effort level, `statusLine`, `permissions`, `hooks` — simply do not
+exist inside the box. You reconfigure every box by hand, and lose it again whenever
+the volume is recreated.
+
+Sharing the host's `~/.claude` directly is not an option:
+
+- It breaks the minimal-mount rule ([01](01-isolation-model.md)) — credentials,
+  history and every project's state would enter the box.
+- It opens the **box → host** direction. The box runs YOLO
+  ([04](04-yolo-by-default.md)), so a writable host `settings.json` would let it
+  plant a `hooks` entry that the *host's* Claude Code then executes, outside the
+  box. That is an escape hatch dressed up as a config file.
+
+So the question is narrower: how do we get *just the settings* in, without ever
+letting anything out?
+
+## Decision
+
+- **Mount only the two settings files, read-only.** `claude-box` mounts
+  `settings.json` and `settings.local.json` from the host's config dir
+  (`CLAUDE_CONFIG_DIR`, else `~/.claude`) at
+  `/etc/claude-box/host-settings{,.local}.json`, `:ro`. They are *not* mounted over
+  the box's own `~/.claude`, so the box keeps a writable settings file of its own —
+  `claude` writes there (theme, effort level, …) and a read-only mount would make
+  those writes fail.
+- **Merge on every launch, host keys win.** `entrypoint.sh` merges each file into
+  the box's counterpart with jq's recursive `*`. Keys the box set on its own survive;
+  keys present on the host overwrite; arrays (`permissions.allow`, …) are taken from
+  the host wholesale. Editing the host file takes effect on the next start, and
+  recreating the volume restores the settings — the "idempotent init" property the
+  box relies on elsewhere ([03](03-persistent-auth-state.md)).
+- **On by default, opt out with `CLAUDE_BOX_SETTINGS=off`**, following `~/.gitconfig`
+  ([01](01-isolation-model.md)): an existing host config file is brought in read-only
+  when it is there, and one flag turns it off. ([09](09-import-host-claude-config.md)
+  later applies the same default to the rest of the host's `~/.claude`, and adds
+  `CLAUDE_BOX_HOST_CONFIG` for the whole family.)
+- **A malformed host file is skipped with a warning**, never fatal: a typo in
+  `settings.json` must not make the box unlaunchable.
+
+## Consequences
+
+### Good
+
+- Your settings follow you into the box, and survive recreating the volume.
+- The host's files are only ever read. Nothing the in-box Claude writes to its
+  settings can reach the host — the direction that would matter is closed at the
+  mount, not by convention.
+- Only two files enter, not `~/.claude` — the minimal-mount rule still holds.
+
+### Trade-offs and notes
+
+- **Host-only settings can break inside the box.** `hooks`, `statusLine` and
+  `apiKeyHelper` may invoke commands or paths that exist only on the host. This is
+  the same class of problem as a `~/.gitconfig` with `credential.helper=osxkeychain`,
+  and has the same remedy: `CLAUDE_BOX_SETTINGS=off`, or move the host-specific bits
+  out of the global file.
+- **Deletions do not propagate.** A merge only adds and overwrites, so a key removed
+  on the host lingers in the box until it is edited out there (or the volume is
+  recreated).
+- **Secrets in settings travel too.** An `env` block or an `apiKeyHelper` in the
+  global settings is now readable inside the box. The box is egress-restricted, not
+  a vault — see [SECURITY.md](../../SECURITY.md).
+- **`settings.local.json` is carried in, but current Claude Code does not read it at
+  user scope.** As of 2.1.x the user scope resolves to `settings.json` alone;
+  `settings.local.json` is a project-scoped (gitignored) file. It is imported anyway,
+  so a host that keeps one — or a future version that reads it — needs no change here.

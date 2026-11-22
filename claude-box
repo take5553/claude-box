@@ -44,33 +44,166 @@ if [ -z "${CLAUDE_BOX_NO_GITCONFIG:-}" ] && [ -f "$HOME/.gitconfig" ]; then
   GITCONFIG_MOUNT=(-v "$HOME/.gitconfig:/home/node/.gitconfig:ro")
 fi
 
-# Bring in your own skills (read-write / Claude can edit and generate them).
-# Not mounted by default. Enabled only when CLAUDE_SKILLS_DIR is set
-# (minimal-mount principle = design 01).
-#   e.g.: CLAUDE_SKILLS_DIR=~/dev/my-skills claude-box
-# If it is set but the directory does not exist, stop with an explicit error
-# rather than creating it (guards against typos).
-SKILLS_MOUNT=()
-if [ -n "${CLAUDE_SKILLS_DIR:-}" ]; then
-  if [ -d "$CLAUDE_SKILLS_DIR" ]; then
-    SKILLS_MOUNT=(-v "$CLAUDE_SKILLS_DIR:/home/node/.claude/skills")
+# ---------------------------------------------------------------------------
+# Import the host's own Claude Code config (design 08 / 09 / 10 / 11)
+#
+# A box should behave like the claude you already configured, so the host's
+# ~/.claude is brought in **by default** -- settings, skills, agents, commands and
+# the global CLAUDE.md. Only those; never the whole directory (credentials, history
+# and every project's state stay on the host = design 01). The host's config dir
+# follows CLAUDE_CONFIG_DIR, the same way claude does. Only paths that already exist
+# are mounted; nothing is created on the host.
+#
+# Every item has a mode:
+#   rw  -- share the host's file/directory. What the box writes lands on the host.
+#   ro  -- **the default**. The config comes in, but nothing the box does reaches the
+#          host: settings are merged into the box's own copy and CLAUDE.md replaces it
+#          (both by entrypoint), directories are mounted read-only.
+#   off -- do not bring it in at all.
+# CLAUDE_BOX_HOST_CONFIG sets the mode for every item at once, and
+# CLAUDE_BOX_{SETTINGS,SKILLS,AGENTS,COMMANDS,PLUGINS,GLOBAL_MD_MODE} override it per
+# item (design 11). Read-only is the default because the box runs YOLO and the host's
+# Claude reads these same files afterwards; a box that wants to keep a change asks for
+# `rw` explicitly (it is told to: entrypoint hands claude a note about the modes below).
+# ---------------------------------------------------------------------------
+HOST_CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+
+# resolve_mode <item variable's value> <built-in default> <variable name> -> MODE
+# Precedence: the item's own variable, then CLAUDE_BOX_HOST_CONFIG, then the default.
+# A typo is fatal rather than silently ignored -- these decide what the box may write.
+# Each resolved mode is appended to MODES_SUMMARY, which is passed into the container
+# so the in-box claude can say *which* variable to change (design 11).
+MODE=""
+MODES_SUMMARY=""
+resolve_mode() {
+  MODE="${1:-${CLAUDE_BOX_HOST_CONFIG:-$2}}"
+  case "$MODE" in
+    rw|ro|off) ;;
+    *) echo "claude-box: $3 must be rw, ro or off (got '$MODE')" >&2; exit 1 ;;
+  esac
+  MODES_SUMMARY="${MODES_SUMMARY}${MODES_SUMMARY:+ }$3=$MODE"
+}
+
+# mount_config_dir <name> <mode> [source dir] -- one of the ~/.claude directories.
+mount_config_dir() {
+  local name="$1" mode="$2" src="${3:-$HOST_CLAUDE_DIR/$1}"
+  [ "$mode" != "off" ] && [ -d "$src" ] || return 0
+  if [ "$mode" = "ro" ]; then
+    CONFIG_MOUNTS+=(-v "$src:/home/node/.claude/$name:ro")
   else
+    CONFIG_MOUNTS+=(-v "$src:/home/node/.claude/$name")
+  fi
+}
+
+# settings.json / settings.local.json.
+#   ro (default): mounted at a dedicated path under /etc/claude-box and *merged* into
+#       the box's own copy by entrypoint (host keys win, keys the box set itself
+#       survive), so the box keeps a settings.json it can write and the host's file is
+#       never touched (design 08). Note the box's writes *succeed* here -- they simply
+#       do not travel -- so the note entrypoint hands claude is what makes that visible.
+#   rw: the host's files *are* the box's files, so /config, permission changes and
+#       the like write straight through. claude writes settings atomically (temp file
+#       + rename); renaming onto a bind-mounted file fails with EBUSY, and claude
+#       falls back to an in-place write -- which is what makes this work (design 10).
+resolve_mode "${CLAUDE_BOX_SETTINGS:-}" ro CLAUDE_BOX_SETTINGS
+SETTINGS_MOUNT=()
+case "$MODE" in
+  rw)
+    [ -f "$HOST_CLAUDE_DIR/settings.json" ] \
+      && SETTINGS_MOUNT+=(-v "$HOST_CLAUDE_DIR/settings.json:/home/node/.claude/settings.json")
+    [ -f "$HOST_CLAUDE_DIR/settings.local.json" ] \
+      && SETTINGS_MOUNT+=(-v "$HOST_CLAUDE_DIR/settings.local.json:/home/node/.claude/settings.local.json")
+    ;;
+  ro)
+    [ -f "$HOST_CLAUDE_DIR/settings.json" ] \
+      && SETTINGS_MOUNT+=(-v "$HOST_CLAUDE_DIR/settings.json:/etc/claude-box/host-settings.json:ro")
+    [ -f "$HOST_CLAUDE_DIR/settings.local.json" ] \
+      && SETTINGS_MOUNT+=(-v "$HOST_CLAUDE_DIR/settings.local.json:/etc/claude-box/host-settings.local.json:ro")
+    ;;
+esac
+
+# skills / agents / commands -- read-only by default: they are all there, but writing
+# one fails with EROFS, which is the signal that makes the box ask for `rw` instead of
+# silently keeping a skill the host will never see (design 11).
+#
+# plugins is the exception, read-write: a plugin the host has enabled must work in the
+# box (a security plugin that quietly does not come along is the failure we care about
+# most), and claude *writes* to this directory as a matter of course -- repairing the
+# absolute installLocation paths in known_marketplaces.json, migrating
+# installed_plugins.json -- so read-only would mean errors on every launch rather than
+# a signal at the moment of a real change. CLAUDE_BOX_PLUGINS=ro/off if you disagree.
+# CLAUDE_SKILLS_DIR points skills at another directory -- an explicit source, so the
+# family switch does not silence it; if it is set but missing, stop with an explicit
+# error rather than creating it (guards against typos).
+#   e.g.: CLAUDE_SKILLS_DIR=~/dev/my-skills claude-box
+CONFIG_MOUNTS=()
+if [ -n "${CLAUDE_SKILLS_DIR:-}" ]; then
+  if [ ! -d "$CLAUDE_SKILLS_DIR" ]; then
     echo "claude-box: CLAUDE_SKILLS_DIR=$CLAUDE_SKILLS_DIR does not exist as a directory" >&2
     exit 1
   fi
+  resolve_mode "${CLAUDE_BOX_SKILLS:-ro}" ro CLAUDE_BOX_SKILLS
+  mount_config_dir skills "$MODE" "$CLAUDE_SKILLS_DIR"
+else
+  resolve_mode "${CLAUDE_BOX_SKILLS:-}" ro CLAUDE_BOX_SKILLS
+  mount_config_dir skills "$MODE"
 fi
+resolve_mode "${CLAUDE_BOX_AGENTS:-}" ro CLAUDE_BOX_AGENTS
+mount_config_dir agents "$MODE"
+resolve_mode "${CLAUDE_BOX_COMMANDS:-}" ro CLAUDE_BOX_COMMANDS
+mount_config_dir commands "$MODE"
+resolve_mode "${CLAUDE_BOX_PLUGINS:-}" rw CLAUDE_BOX_PLUGINS
+mount_config_dir plugins "$MODE"
 
-# Optional: an instructions file appended to the container's global CLAUDE.md
-# (nothing is injected by default). Only when CLAUDE_BOX_GLOBAL_MD is given a file
-# path on the host is it mounted read-only, and entrypoint appends it idempotently
-# (restored even when the volume is recreated). The default is "do nothing" so that
-# personal preferences are not injected into someone else's box without consent.
+# Global CLAUDE.md. Default `ro`: mounted read-only at the path below, and entrypoint
+# *replaces* the box's copy with it at every launch -- so the box's house rules are
+# exactly the host's, while a `#`-shortcut memory written in the box stays in the box.
+# With `rw` the host's file is mounted straight over the box's copy and those memories
+# land on the host (design 09/10/11). Note that the box's own guidance does *not* live
+# in this file: it is appended to claude's system prompt instead, so it works the same
+# in every mode and never gets written into the host's CLAUDE.md.
+# CLAUDE_BOX_GLOBAL_MD overrides the source file -- an explicit source, so the family
+# switch does not silence it; a path that does not exist is a warning, not a failure.
 GLOBAL_MD_MOUNT=()
+GLOBAL_MD_FILE=""
 if [ -n "${CLAUDE_BOX_GLOBAL_MD:-}" ]; then
+  resolve_mode "${CLAUDE_BOX_GLOBAL_MD_MODE:-ro}" ro CLAUDE_BOX_GLOBAL_MD_MODE
   if [ -f "$CLAUDE_BOX_GLOBAL_MD" ]; then
-    GLOBAL_MD_MOUNT=(-v "$CLAUDE_BOX_GLOBAL_MD:/etc/claude-box/global-CLAUDE.md:ro")
+    GLOBAL_MD_FILE="$CLAUDE_BOX_GLOBAL_MD"
   else
     echo "claude-box: CLAUDE_BOX_GLOBAL_MD=$CLAUDE_BOX_GLOBAL_MD not found (skipping injection)" >&2
+  fi
+else
+  resolve_mode "${CLAUDE_BOX_GLOBAL_MD_MODE:-}" ro CLAUDE_BOX_GLOBAL_MD_MODE
+  if [ -f "$HOST_CLAUDE_DIR/CLAUDE.md" ]; then
+    GLOBAL_MD_FILE="$HOST_CLAUDE_DIR/CLAUDE.md"
+  fi
+fi
+if [ -n "$GLOBAL_MD_FILE" ]; then
+  case "$MODE" in
+    rw) GLOBAL_MD_MOUNT=(-v "$GLOBAL_MD_FILE:/home/node/.claude/CLAUDE.md") ;;
+    ro) GLOBAL_MD_MOUNT=(-v "$GLOBAL_MD_FILE:/etc/claude-box/global-CLAUDE.md:ro") ;;
+  esac
+fi
+
+# Hand the resolved modes to the container. entrypoint turns them into a note appended
+# to claude's system prompt, so the in-box claude knows a change it makes to ~/.claude
+# will not reach the host, and can name the variable that would let it (design 11).
+MODES_ENV=(-e "CLAUDE_BOX_MODES=$MODES_SUMMARY")
+
+# rw on a Linux host whose user is not uid 1000. A bind mount keeps the host's
+# ownership as is, and the box runs as node (uid 1000), so the box can read the
+# shared files but writing them fails with "Permission denied". Docker Desktop on
+# macOS translates ownership, and a typical Linux desktop's first user is uid 1000,
+# so neither is affected. Warn rather than silently switch to ro: the mode is the
+# user's choice, and design 10 records the limitation.
+if [ "$(uname -s)" = "Linux" ] && [ "$(id -u)" != "1000" ]; then
+  rw_items=""
+  for kv in $MODES_SUMMARY; do
+    [ "${kv#*=}" = "rw" ] && rw_items="${rw_items}${rw_items:+ }${kv%=*}"
+  done
+  if [ -n "$rw_items" ]; then
+    echo "claude-box: WARN: your uid is $(id -u), the box runs as uid 1000; writes from the box to rw imports will fail with Permission denied ($rw_items). Set them to ro if you do not need writes (design 10)." >&2
   fi
 fi
 
@@ -93,6 +226,27 @@ if [ -z "${CLAUDE_BOX_NO_REQUEST_DIR:-}" ]; then
   mkdir -p "$REQUEST_DIR"
   REQUEST_DIR_MOUNT=(-v "$REQUEST_DIR:/home/node/.claude-box/requests")
   REQUEST_DIR_ENV=(-e "CLAUDE_BOX_REQUEST_DIR=/home/node/.claude-box/requests")
+
+  # The return channel: the maintainer's replies to those requests (design 12).
+  # Mounted READ-ONLY and kept apart from the outbox on purpose: every box shares the
+  # outbox read-write, so a reply placed there could be forged by any (possibly
+  # injected) box and then trusted by another project's Claude. Read-only makes the
+  # maintainer, on the host, the only writer. Defaults to ~/.claude-box/replies;
+  # relocate with CLAUDE_BOX_REPLY_DIR. Off together with the outbox.
+  REPLY_DIR="${CLAUDE_BOX_REPLY_DIR:-$HOME/.claude-box/replies}"
+  mkdir -p "$REPLY_DIR"
+  # If one folder sat inside the other, the box could write replies through the
+  # read-write outbox mount and the :ro below would protect nothing. Refuse.
+  req_real="$(cd "$REQUEST_DIR" && pwd -P)"
+  rep_real="$(cd "$REPLY_DIR" && pwd -P)"
+  case "$rep_real/" in "$req_real"/*) overlap=1 ;; *) overlap="" ;; esac
+  case "$req_real/" in "$rep_real"/*) overlap=1 ;; esac
+  if [ -n "$overlap" ]; then
+    echo "claude-box: CLAUDE_BOX_REPLY_DIR ($rep_real) and CLAUDE_BOX_REQUEST_DIR ($req_real) must not contain each other" >&2
+    exit 2
+  fi
+  REQUEST_DIR_MOUNT+=(-v "$REPLY_DIR:/home/node/.claude-box/replies:ro")
+  REQUEST_DIR_ENV+=(-e "CLAUDE_BOX_REPLY_DIR=/home/node/.claude-box/replies")
 fi
 
 # Normalize terminal colors (avoid color mismatches on terminals lacking terminfo)
@@ -185,8 +339,10 @@ TTY_FLAGS=(-it)
   "${NESTED_OPTS[@]}" \
   -v "$PWD:$PWD" \
   -v "$CONFIG_VOLUME:/home/node/.claude" \
-  "${SKILLS_MOUNT[@]}" \
+  "${CONFIG_MOUNTS[@]}" \
   "${GLOBAL_MD_MOUNT[@]}" \
+  "${SETTINGS_MOUNT[@]}" \
+  "${MODES_ENV[@]}" \
   "${GITCONFIG_MOUNT[@]}" \
   "${GH_ENV[@]}" \
   "${REQUEST_DIR_MOUNT[@]}" \

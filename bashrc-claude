@@ -10,15 +10,21 @@
 # When a notification bridge is present (CLAUDE_BOX_BRIDGE_PORT), add the hook
 # definitions (--settings additively merges into existing settings) to forward
 # waiting/completion events to the host-side bridge.
+# CLAUDE_BOX_NOTES points at the note the entrypoint wrote about how the host's config
+# was imported (read-only by default), appended to the system prompt so claude can tell
+# the user which claude-box variable to change instead of silently losing a change
+# (design 11).
 claude() {
-  local box_plugin=() notify_settings=()
+  local box_plugin=() notify_settings=() box_notes=()
   [ -n "${CLAUDE_BOX_PLUGIN_DIR:-}" ] && box_plugin=(--plugin-dir "$CLAUDE_BOX_PLUGIN_DIR")
+  [ -n "${CLAUDE_BOX_NOTES:-}" ] && box_notes=(--append-system-prompt "$(cat "$CLAUDE_BOX_NOTES")")
   [ -n "${CLAUDE_BOX_BRIDGE_PORT:-}" ] && notify_settings=(--settings /etc/claude-box/notify-hooks.json)
   case "${1:-}" in
     login|logout|update|mcp|config|doctor|setup-token|--version|-v|--help|-h)
       command claude "$@" ;;
     *)
-      command claude --dangerously-skip-permissions "${box_plugin[@]}" "${notify_settings[@]}" "$@" ;;
+      command claude --dangerously-skip-permissions \
+        "${box_plugin[@]}" "${box_notes[@]}" "${notify_settings[@]}" "$@" ;;
   esac
 }
 

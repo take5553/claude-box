@@ -31,6 +31,27 @@ boundaries before relying on it.
 - **A `GH_TOKEN` you pass in is fully usable by the in-box Claude.** Anything that
   token can do, the box can do. Use a narrowly-scoped, short-lived token, never a
   long-lived personal token with broad scope.
+- **Your Claude Code config comes in with you.** By default the host's `~/.claude`
+  settings, global `CLAUDE.md`, `skills/`, `agents/`, `commands/` and `plugins/`
+  are applied inside the box ([08](docs/design/08-host-global-settings-import.md),
+  [09](docs/design/09-import-host-claude-config.md),
+  [10](docs/design/10-host-config-import-modes.md)), so whatever they contain —
+  `hooks`, `env`, `apiKeyHelper` — is readable and runnable *inside* the box. If you
+  keep secrets there, they travel.
+- **That import is read-only by default — except `~/.claude/plugins`.** Everything
+  else comes in as a copy or a read-only mount, so a box running YOLO cannot leave a
+  hook in your `settings.json` or a skill in `skills/` for your *host's* Claude Code to
+  execute later. `plugins/` is shared read-write, because a plugin you enabled on the
+  host silently not working in the box is the worse failure and Claude Code writes into
+  that directory routinely — which makes it the one path where the box can leave
+  something behind that runs on your machine later
+  ([11](docs/design/11-read-only-by-default-and-telling-claude.md)).
+  `CLAUDE_BOX_PLUGINS=ro` or `off` closes it.
+- **Sharing the rest is one variable away, so know what it turns on.**
+  `CLAUDE_BOX_HOST_CONFIG=rw` (or a per-item `CLAUDE_BOX_SETTINGS=rw`, …) makes the
+  box's writes land on your files — useful, and exactly the path described above.
+  Keeping `~/.claude` under version control, or diffing it after a session, is the
+  cheap way to see what came back.
 - **You can turn the protections off yourself.** `SKIP_FIREWALL=1` disables egress
   filtering entirely (unrestricted outbound), and `ALLOW_DOMAINS` replaces the
   optional allow-list. These are intentional escape hatches; using them is on you.

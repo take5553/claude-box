@@ -35,6 +35,14 @@ layers.
      control the subject can `unset` is not a control.
    - IPv6 is not covered by the redirect, so `ip6tables` drops everything except
      DNS to keep it from being an open path.
+   - The backend (`iptables-legacy` or `iptables-nft`) is chosen **at startup**
+     from what the running kernel supports: legacy where its tables still exist
+     (unchanged on Docker Desktop), otherwise nft; neither → abort. A build-time
+     choice cannot know the host kernel, and newer kernels (Ubuntu 26.04, the
+     GitHub Actions runner since late 2026) dropped legacy iptables, so a
+     legacy-only box failed to start there. `ip6tables` goes through the same
+     backend; left on legacy, the IPv6 close-off would only have warned and
+     continued.
 
 2. **nginx (the layer that decides)**
    - 443: `ssl_preread` reads the **SNI** from the TLS ClientHello and matches it
@@ -102,7 +110,9 @@ environment variables — must pass a hostname-shape check before it reaches the
 nginx config (injection guard); duplicates are de-duplicated (nginx map keys must
 be unique). GitHub's log artifacts live on Azure Blob, allowed by the narrow
 pattern `productionresultssa[0-9]+\.blob\.core\.windows\.net` rather than opening
-`*.blob.core.windows.net`.
+`*.blob.core.windows.net`. The API reaches that storage through
+`results-receiver.actions.githubusercontent.com` (an exact host in the GitHub
+group), so both are needed for `gh run view --log` to work.
 
 ### Startup self-check
 
