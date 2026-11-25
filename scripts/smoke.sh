@@ -32,11 +32,24 @@ fi
 
 echo "[2/7] init-firewall startup self-check (allowed reachable, disallowed blocked)"
 # The entrypoint runs init-firewall.sh, which exits non-zero if any self-check fails.
-if "$ENGINE" run --rm "${FIREWALL_CAPS[@]}" "$IMAGE" true; then
+if fw_out="$("$ENGINE" run --rm "${FIREWALL_CAPS[@]}" "$IMAGE" \
+              sh -c 'echo FIRST_LINE; tail -n1 /tmp/claude-box/firewall.log' 2>&1)"; then
   pass "startup firewall self-check passed"
 else
+  echo "$fw_out" >&2
   fail "startup firewall self-check failed"
 fi
+# The progress log goes to a file, so the command's own output is the first thing on
+# the terminal. Host apps name the conversation after that line. WARN lines are
+# exempt: they are surfaced on purpose, and a runner may have reasons to emit them.
+first_line="$(printf '%s\n' "$fw_out" | grep -v 'WARN' | head -n1)"
+[ "$first_line" = "FIRST_LINE" ] \
+  || fail "the firewall log reached the terminal before the command (got '$first_line')"
+pass "the firewall progress log stays off the terminal"
+case "$fw_out" in
+  *"[firewall] done."*) pass "the firewall log was written to /tmp/claude-box/firewall.log" ;;
+  *) fail "expected the firewall log in /tmp/claude-box/firewall.log, got '$fw_out'" ;;
+esac
 
 echo "[3/7] a disallowed host is blocked at runtime"
 if "$ENGINE" run --rm "${FIREWALL_CAPS[@]}" "$IMAGE" \
@@ -47,7 +60,7 @@ else
 fi
 
 echo "[4/7] runs non-root with no effective capabilities"
-# The entrypoint prints firewall logs to stdout before exec-ing the command, so the
+# The entrypoint may print firewall WARN lines before exec-ing the command, so the
 # value we want is the last line of the captured output.
 who="$("$ENGINE" run --rm "${FIREWALL_CAPS[@]}" "$IMAGE" id -un | tail -n1)"
 [ "$who" = "node" ] || fail "expected to run as 'node', got '$who'"
