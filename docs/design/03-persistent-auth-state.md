@@ -42,6 +42,10 @@ with the host Claude's.
   [10](10-host-config-import-modes.md),
   [11](11-read-only-by-default-and-telling-claude.md)). Credentials, history and
   per-project state are not among them and stay in the volume.
+  **Amended by [13](13-share-project-sessions.md)**: with the opt-in
+  `CLAUDE_BOX_SESSIONS=rw`, the current project's session logs and auto-memory
+  (`projects/<key>/`) are the host's own directory instead. They are off by default,
+  and other projects and credentials are unaffected.
 
 ## Consequences
 

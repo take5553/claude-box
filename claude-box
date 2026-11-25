@@ -186,6 +186,42 @@ if [ -n "$GLOBAL_MD_FILE" ]; then
   esac
 fi
 
+# This project's session logs (design 13). Off by default: transcripts and auto-memory
+# live in the box's volume, out of the host's sight (design 03). CLAUDE_BOX_SESSIONS=rw
+# bind-mounts the host's own ~/.claude/projects/<key>/ -- for *this* project only --
+# over the volume's copy, so host tools that read Claude Code sessions (orca, the
+# host's `claude --resume`) see what the box writes, and the box sees the host's
+# sessions for the same project.
+#
+# This is a box -> host write path into files the host's Claude *loads*: the auto-memory
+# in <key>/memory/ goes into its context at startup, and a transcript can be resumed
+# there. It is therefore not part of CLAUDE_BOX_HOST_CONFIG (which would make
+# CLAUDE_BOX_HOST_CONFIG=rw open it as a side effect); it has its own switch. There is
+# no `ro`: claude has to write its transcript, so a read-only mount would just break it.
+#
+# The key is the project path with every non-alphanumeric character replaced by `-`
+# (the project is mounted at the same path, so it matches the host's key). claude
+# shortens keys over 200 characters with a hash we do not reproduce -- refuse those
+# rather than mount a directory claude will not use.
+SESSIONS_MODE="${CLAUDE_BOX_SESSIONS:-off}"
+SESSIONS_MOUNT=()
+case "$SESSIONS_MODE" in
+  rw|off) ;;
+  *) echo "claude-box: CLAUDE_BOX_SESSIONS must be rw or off (got '$SESSIONS_MODE')" >&2; exit 1 ;;
+esac
+if [ "$SESSIONS_MODE" = "rw" ]; then
+  PROJECT_KEY="$(printf '%s' "$PWD" | LC_ALL=C sed 's/[^a-zA-Z0-9]/-/g')"
+  if [ "${#PROJECT_KEY}" -gt 200 ]; then
+    echo "claude-box: CLAUDE_BOX_SESSIONS=rw: the project path is too long for a plain session key (claude hashes it); not sharing sessions" >&2
+    SESSIONS_MODE=off
+  else
+    SESSIONS_SRC="$HOST_CLAUDE_DIR/projects/$PROJECT_KEY"
+    mkdir -p "$SESSIONS_SRC"
+    SESSIONS_MOUNT=(-v "$SESSIONS_SRC:/home/node/.claude/projects/$PROJECT_KEY")
+  fi
+fi
+MODES_SUMMARY="${MODES_SUMMARY} CLAUDE_BOX_SESSIONS=$SESSIONS_MODE"
+
 # Hand the resolved modes to the container. entrypoint turns them into a note appended
 # to claude's system prompt, so the in-box claude knows a change it makes to ~/.claude
 # will not reach the host, and can name the variable that would let it (design 11).
@@ -315,6 +351,17 @@ if [ "${CLAUDE_BOX_NESTED_CONTAINERS:-0}" = "1" ]; then
   )
 fi
 
+# A bind mount at ~/.claude/projects/<key> makes the engine create the mount point and
+# any missing parent inside the volume -- as root. A root-owned projects/ would stop
+# every *other* project's box from saving its transcripts, and a root-owned <key>/
+# would do the same to this project once it is launched with sessions off again. So
+# create both first, as node (the image's user), in a throwaway container with no
+# network and no capabilities (design 13).
+if [ "${#SESSIONS_MOUNT[@]}" -gt 0 ]; then
+  "$ENGINE" run --rm --cap-drop=ALL --network none --entrypoint mkdir \
+    -v "$CONFIG_VOLUME:/home/node/.claude" "$IMAGE" -p "/home/node/.claude/projects/$PROJECT_KEY"
+fi
+
 # Mount the project at the same absolute path as on the host (and match -w). Claude
 # Code saves history keyed by the current path, so a fixed /workspace would mix the
 # history of every project under the same key. See README for the list of host
@@ -342,6 +389,7 @@ TTY_FLAGS=(-it)
   "${CONFIG_MOUNTS[@]}" \
   "${GLOBAL_MD_MOUNT[@]}" \
   "${SETTINGS_MOUNT[@]}" \
+  "${SESSIONS_MOUNT[@]}" \
   "${MODES_ENV[@]}" \
   "${GITCONFIG_MOUNT[@]}" \
   "${GH_ENV[@]}" \

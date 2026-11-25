@@ -109,6 +109,14 @@ if [ -n "${CLAUDE_BOX_MODES:-}" ] && claude --help 2>/dev/null | grep -q -- '--a
     echo "  effect on the next launch, so say so before doing the work."
     echo "- A skill, subagent or command only this project needs is better placed in"
     echo "  \`.claude/\` inside the project, which is writable and versioned with the code."
+    echo
+    echo "\`CLAUDE_BOX_SESSIONS\` is separate from the config import (\`CLAUDE_BOX_HOST_CONFIG\`"
+    echo "does not change it) and covers this project's \`~/.claude/projects/<key>/\`: the"
+    echo "session transcripts and auto-memory. \`off\` keeps them in this container's"
+    echo "volume, where host tools cannot see them; \`CLAUDE_BOX_SESSIONS=rw claude-box\`"
+    echo "shares them. When it is \`rw\`, that directory *is* the host's: the host's Claude"
+    echo "loads that memory and can resume those transcripts, and you may see the host's"
+    echo "own sessions for this project. Write memory there only as you would on the host."
   } > "$CLAUDE_BOX_NOTES"
 fi
 export CLAUDE_BOX_NOTES

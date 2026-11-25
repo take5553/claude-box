@@ -176,6 +176,7 @@ CLAUDE_BOX_HOST_CONFIG=rw claude-box  # 全部共有する
 | `CLAUDE_BOX_GLOBAL_MD_MODE` | グローバル `CLAUDE.md` のモード。既定 `ro`(ホストのファイルで箱側を毎起動置換)。`rw` なら共有 |
 | `CLAUDE_BOX_REQUEST_DIR` | env-request の outbox にするホストフォルダ。**既定 on**(`~/.claude-box/requests`)。置き場を変えたいとき指定 |
 | `CLAUDE_BOX_REPLY_DIR` | 要望への返答をメンテナが書くホストフォルダ(既定 `~/.claude-box/replies`、**読み取り専用**でマウント)。outbox と重ねてはいけない |
+| `CLAUDE_BOX_SESSIONS` | `rw` で**このプロジェクトの**セッションログと auto-memory(`~/.claude/projects/<key>/`)をホストと共有し、orca や `claude --resume` などホスト側のツールから見えるようにする。既定 `off`。`CLAUDE_BOX_HOST_CONFIG` の対象外で、箱が書いた内容はホストの Claude に読み込まれる([design 13](docs/design/13-share-project-sessions.md)) |
 | `CLAUDE_BOX_NO_REQUEST_DIR=1` | env-request の outbox と返答フォルダを無効化(既定 on) |
 | `EXTRA_ALLOW_DOMAINS` | egress 許可先を**追加**する(コアは常に含む。スペース区切り) |
 | `ALLOW_DOMAINS` | egress 許可リストを丸ごと上書き(スペース区切り。**コアは常に残る**) |
@@ -236,6 +237,7 @@ claude-box` はラッパーの値より優先される。とくに `GH_TOKEN` �
 | `~/.claude/plugins` | `/home/node/.claude/plugins`(**rw** 共有) | 在れば**既定 on**。ホストで有効にしたプラグインを動かすため rw = 箱がホストへ書ける唯一の経路([design 11](docs/design/11-read-only-by-default-and-telling-claude.md)) |
 | グローバル `CLAUDE.md` | `/etc/claude-box/global-CLAUDE.md`(ro)→ `/home/node/.claude/CLAUDE.md` を**置換** | ファイルが在れば**既定 on**。毎起動で置換するので箱の中での編集は残らない(`CLAUDE_BOX_GLOBAL_MD_MODE=rw` なら共有)。`CLAUDE_BOX_GLOBAL_MD` で元ファイルを差し替え |
 | 持ち込みモードと箱からの注意書き | `CLAUDE_BOX_MODES` → `claude` のシステムプロンプトへ追記 | 常時。箱の中の Claude が「この変更はホストに届かない/どの変数を付ければ届く」を知るための経路([design 11](docs/design/11-read-only-by-default-and-telling-claude.md)) |
+| `~/.claude/projects/<key>/`(このプロジェクトのみ) | `/home/node/.claude/projects/<key>/`(**rw** 共有) | `CLAUDE_BOX_SESSIONS=rw` のときだけ(ホストに無ければ作成)。セッションログと auto-memory。指定しなければボリューム内に留まる([design 13](docs/design/13-share-project-sessions.md)) |
 | コンテナ用ボリューム | `/home/node/.local/share/containers` | `CLAUDE_BOX_NESTED_CONTAINERS=1` のときだけ |
 | 要望の outbox | `/home/node/.claude-box/requests` | **既定 on**(ホスト `~/.claude-box/requests`・読み書き)。`CLAUDE_BOX_NO_REQUEST_DIR=1` で無効化 |
 | 要望への返答 | `/home/node/.claude-box/replies` | outbox と一緒に有効(ホスト `~/.claude-box/replies`・**読み取り専用**)。メンテナからの返答([design 12](docs/design/12-env-request-replies.md)) |

@@ -182,6 +182,7 @@ own volume. The reasoning is in
 | `CLAUDE_BOX_SKILLS` / `CLAUDE_BOX_AGENTS` / `CLAUDE_BOX_COMMANDS` | Mode for `~/.claude/skills` / `agents` / `commands`. Default `ro`. |
 | `CLAUDE_BOX_PLUGINS` | Mode for `~/.claude/plugins`. Default **`rw`**, so a plugin enabled on the host works in the box. |
 | `CLAUDE_BOX_GLOBAL_MD_MODE` | Mode for the global `CLAUDE.md`. Default `ro` (the host's file replaces the box's copy at startup); `rw` shares the file. |
+| `CLAUDE_BOX_SESSIONS` | `rw` shares **this project's** session logs and auto-memory (`~/.claude/projects/<key>/`) with the host, so host tools such as orca or `claude --resume` see them. Default `off`. Not covered by `CLAUDE_BOX_HOST_CONFIG`; the host's Claude loads what the box writes there ([design 13](docs/design/13-share-project-sessions.md)). |
 | `CLAUDE_BOX_REQUEST_DIR` | Host folder for the env-request outbox. **On by default** (`~/.claude-box/requests`); set this to relocate it. |
 | `CLAUDE_BOX_REPLY_DIR` | Host folder where the maintainer writes replies to requests (default `~/.claude-box/replies`, mounted **read-only**). Must not overlap the outbox. |
 | `CLAUDE_BOX_NO_REQUEST_DIR=1` | Turn off the env-request outbox and reply folder (on by default). |
@@ -247,6 +248,7 @@ Only these host resources enter the box. **The home directory is not mounted.**
 | `~/.claude/plugins` | `/home/node/.claude/plugins` (**rw**, shared) | **default on** if it exists. Read-write so host-enabled plugins work — the one path where the box writes back ([design 11](docs/design/11-read-only-by-default-and-telling-claude.md)). |
 | Global `CLAUDE.md` | `/etc/claude-box/global-CLAUDE.md` (ro) → **replaces** `/home/node/.claude/CLAUDE.md` | **default on** if the file exists. Replaced at every launch, so in-box edits do not survive; `CLAUDE_BOX_GLOBAL_MD_MODE=rw` shares the file instead. Source overridable with `CLAUDE_BOX_GLOBAL_MD`. |
 | Import modes + the box's own note | `CLAUDE_BOX_MODES` → a note appended to `claude`'s system prompt | always. How the in-box Claude knows a `~/.claude` change will not reach you, and which variable would let it ([design 11](docs/design/11-read-only-by-default-and-telling-claude.md)). |
+| `~/.claude/projects/<key>/` (this project only) | `/home/node/.claude/projects/<key>/` (**rw**, shared) | only if `CLAUDE_BOX_SESSIONS=rw` (created on the host if missing). Session transcripts and auto-memory; otherwise they stay in the volume ([design 13](docs/design/13-share-project-sessions.md)). |
 | Containers volume | `/home/node/.local/share/containers` | only if `CLAUDE_BOX_NESTED_CONTAINERS=1`. |
 | Request outbox | `/home/node/.claude-box/requests` | **default on** (host `~/.claude-box/requests`, read-write); disable with `CLAUDE_BOX_NO_REQUEST_DIR=1`. |
 | Request replies | `/home/node/.claude-box/replies` | with the outbox (host `~/.claude-box/replies`, **read-only**): the maintainer's answers ([design 12](docs/design/12-env-request-replies.md)). |
