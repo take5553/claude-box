@@ -3,10 +3,27 @@ set -euo pipefail
 
 # The firewall needs root, so run it via a scoped sudo (the container runs as the node user).
 # It can only be disabled when SKIP_FIREWALL=1 (= egress becomes unrestricted, so warn explicitly).
+#
+# Its progress log goes to a file rather than the terminal. Host apps that wrap the
+# terminal (orca, for one) name the conversation after the first line they see, and that
+# line used to be "[firewall] generating allowlist..." in every box. The firewall still
+# fails closed: a failed self-check prints the whole log and stops the box. WARN lines
+# from a run that succeeded are still shown, because they mean something is off. The
+# warning for a *disabled* firewall stays on the terminal unconditionally.
+# CLAUDE_BOX_VERBOSE=1 brings the full log back on the terminal.
+FIREWALL_LOG=/tmp/claude-box/firewall.log
 if [ "${SKIP_FIREWALL:-0}" = "1" ]; then
   echo "[entrypoint] WARNING: firewall disabled (SKIP_FIREWALL=1) — outbound traffic is unrestricted"
-else
+elif [ "${CLAUDE_BOX_VERBOSE:-0}" = "1" ]; then
   sudo /usr/local/bin/init-firewall.sh
+else
+  mkdir -p "$(dirname "$FIREWALL_LOG")"
+  if ! sudo /usr/local/bin/init-firewall.sh > "$FIREWALL_LOG" 2>&1; then
+    cat "$FIREWALL_LOG" >&2
+    echo "[entrypoint] ERROR: firewall setup failed — not starting (log: $FIREWALL_LOG)" >&2
+    exit 1
+  fi
+  grep -F 'WARN' "$FIREWALL_LOG" >&2 || true
 fi
 
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-/home/node/.claude}"
@@ -117,6 +134,9 @@ if [ -n "${CLAUDE_BOX_MODES:-}" ] && claude --help 2>/dev/null | grep -q -- '--a
     echo "shares them. When it is \`rw\`, that directory *is* the host's: the host's Claude"
     echo "loads that memory and can resume those transcripts, and you may see the host's"
     echo "own sessions for this project. Write memory there only as you would on the host."
+    echo
+    echo "The egress firewall's startup log (allow-list, self-check results) is in"
+    echo "\`/tmp/claude-box/firewall.log\`; read it first when a host cannot be reached."
   } > "$CLAUDE_BOX_NOTES"
 fi
 export CLAUDE_BOX_NOTES

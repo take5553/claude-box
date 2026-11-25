@@ -180,6 +180,7 @@ CLAUDE_BOX_HOST_CONFIG=rw claude-box  # 全部共有する
 | `CLAUDE_BOX_NO_REQUEST_DIR=1` | env-request の outbox と返答フォルダを無効化(既定 on) |
 | `EXTRA_ALLOW_DOMAINS` | egress 許可先を**追加**する(コアは常に含む。スペース区切り) |
 | `ALLOW_DOMAINS` | egress 許可リストを丸ごと上書き(スペース区切り。**コアは常に残る**) |
+| `CLAUDE_BOX_VERBOSE=1` | ファイアウォールの起動ログを端末に表示する。既定では箱の中の `/tmp/claude-box/firewall.log` に書き出す(orca などのアプリが会話名にしてしまうのを避けるため)。失敗時の全ログと WARN 行は常に表示 |
 | `SKIP_FIREWALL=1` | ファイアウォールを無効化(**egress 無制限**。警告表示あり) |
 
 #### `.zshrc` での設定例

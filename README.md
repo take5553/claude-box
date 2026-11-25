@@ -188,6 +188,7 @@ own volume. The reasoning is in
 | `CLAUDE_BOX_NO_REQUEST_DIR=1` | Turn off the env-request outbox and reply folder (on by default). |
 | `EXTRA_ALLOW_DOMAINS` | **Add** egress destinations (core always included; space-separated). |
 | `ALLOW_DOMAINS` | Replace the optional egress list wholesale (space-separated; **core is always kept**). |
+| `CLAUDE_BOX_VERBOSE=1` | Show the firewall's startup log on the terminal. By default it goes to `/tmp/claude-box/firewall.log` in the box, so that apps such as orca do not name the conversation after it. A failure (the full log) and any WARN lines are shown either way. |
 | `SKIP_FIREWALL=1` | Disable the firewall entirely (**unrestricted egress**; prints a warning). |
 
 #### Setting them in `.zshrc`
