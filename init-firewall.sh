@@ -82,8 +82,12 @@ downloads.claude.ai
 #            AWS API that plan/apply would need is intentionally not allowed =
 #            this box goes as far as validating IaC, but does not apply it.
 #   golang : the Go module proxy / checksum DB used when pre-commit's
-#            language:golang hooks (gitleaks, etc.) are built via go install.
+#            language:golang hooks are built via go install.
 #            Go itself is baked in, so go.dev / dl.google.com are not needed.
+#            The proxy redirects some module zips to storage.googleapis.com,
+#            which is deliberately NOT allowed (all of Google Cloud Storage), so
+#            builds with such dependencies fail; gitleaks is baked into the
+#            image as a binary instead (design 06).
 OPTIONAL_DOMAINS="
 github.com
 api.github.com

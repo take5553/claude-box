@@ -81,6 +81,7 @@ Which tools are baked into the image is selectable. The default bakes everything
 | `WITH_PLAYWRIGHT` | `1` | Playwright's Chromium. `0` to drop it. |
 | `GH_VERSION` | latest | Pin the baked `gh` version. |
 | `PRE_COMMIT_VERSION` | latest | Pin the baked pre-commit version. |
+| `GITLEAKS_VERSION` | latest | Pin the baked `gitleaks` version (use it from pre-commit as a `language: system` hook). |
 | `GO_VERSION` | latest stable | Pin the baked Go version. |
 | `PLAYWRIGHT_VERSION` | latest | Pin the baked Chromium version. |
 

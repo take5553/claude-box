@@ -78,6 +78,7 @@ ln -s "$PWD/claude-box" /usr/local/bin/claude-box
 | `WITH_PLAYWRIGHT` | `1` | Playwright の Chromium。`0` で除外 |
 | `GH_VERSION` | 最新 | 焼き込む gh の版を固定 |
 | `PRE_COMMIT_VERSION` | 最新 | 焼き込む pre-commit の版を固定 |
+| `GITLEAKS_VERSION` | 最新 | 焼き込む gitleaks の版を固定(pre-commit からは `language: system` のフックとして使う) |
 | `GO_VERSION` | 最新安定版 | 焼き込む Go の版を固定 |
 | `PLAYWRIGHT_VERSION` | 最新 | 焼き込む Chromium の版を固定 |
 
