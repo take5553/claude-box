@@ -30,9 +30,13 @@ The optional tools can each be dropped at build time (`WITH_PODMAN`, `WITH_GO`,
 - **pre-commit**: to dodge PEP 668, a self-contained zipapp (`.pyz`) run by the
   existing `python3` through a shim; `--build-arg PRE_COMMIT_VERSION`.
 - **Go toolchain** (`WITH_GO`): the `dl.google.com` tarball, baked in. pre-commit
-  then finds the system go, so `language: golang` hooks (e.g. gitleaks) do not
-  re-download Go — **runtime egress narrows to the module proxy only**.
-  `--build-arg GO_VERSION`.
+  then finds the system go, so `language: golang` hooks do not re-download Go —
+  **runtime egress narrows to the module proxy only**. `--build-arg GO_VERSION`.
+  (See the 2026-11-28 update below: the module proxy alone turned out not to be
+  enough for gitleaks.)
+- **gitleaks**: the GitHub releases binary, verified against the release's
+  checksums file; `--build-arg GITLEAKS_VERSION`. Repos run it from pre-commit as a
+  `language: system` hook (`gitleaks git --pre-commit --staged --redact`).
 - **Playwright Chromium** (`WITH_PLAYWRIGHT`): baked into `/opt/ms-playwright` and
   referenced via `PLAYWRIGHT_BROWSERS_PATH`, so the distribution CDN
   (`cdn.playwright.dev`) need not be allowed. Chromium only, no firefox/webkit.
@@ -65,3 +69,24 @@ The optional tools can each be dropped at build time (`WITH_PODMAN`, `WITH_GO`,
   egress. Dropping unused tools with `WITH_*=0` recovers it.
 - Podman / podman-compose are the exception, installed from Debian apt
   ([05](05-nested-containers-rootless-podman.md)) for version alignment.
+
+## Update (2026-11-28): gitleaks baked in as a binary
+
+An env-request from a project that gates commits on gitleaks reported that its
+official pre-commit hook (`language: golang`) never builds inside the box. Verified
+in a firewalled box: `go install github.com/zricethezav/gitleaks/v8@v8.30.1` fails
+because `proxy.golang.org` redirects some module zips to `storage.googleapis.com`,
+which is not allowed. The "module proxy only" assumption above holds for some
+modules but not for gitleaks' dependency tree.
+
+Decision: bake the gitleaks release binary into the image (checksum-verified), and
+have repos switch the hook to `language: system`. Rejected:
+
+- Allowing `storage.googleapis.com` — opens all of Google Cloud Storage.
+- Allowing `release-assets.githubusercontent.com` — opens every GitHub release asset
+  at runtime.
+- An unofficial npm wrapper — reachable, but an unvetted distribution.
+
+`proxy.golang.org` / `sum.golang.org` stay allowed for `go install` of modules that
+do not redirect; a golang hook whose dependencies do redirect should get the same
+treatment as gitleaks (bake the binary) rather than a wider allow-list.

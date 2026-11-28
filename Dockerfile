@@ -139,13 +139,45 @@ RUN set -eux; \
     chmod 0755 /usr/local/bin/pre-commit; \
     pre-commit --version
 
-# Go toolchain (for pre-commit's language: golang hooks, e.g. building gitleaks).
+# Install gitleaks (secret scanner) from the release binaries (env-request, 2026-11-28).
+#   - pre-commit's official gitleaks hook is language: golang and builds from
+#     source at runtime, which fails behind the firewall: proxy.golang.org
+#     redirects some module zips to storage.googleapis.com (not allowed). The
+#     release binaries redirect to release-assets.githubusercontent.com (not allowed).
+#     Baking the binary in at build time adds no runtime egress; repos switch the
+#     hook to  language: system  (entry: gitleaks git --pre-commit --staged --redact)
+#   - Verified against the release's checksums file
+#   - Release assets name the arch x64/arm64, not dpkg's amd64/arm64
+#   - Fetching/pinning the version (--build-arg GITLEAKS_VERSION=8.30.1) works
+#     the same way as gh
+ARG GITLEAKS_VERSION=""
+RUN set -eux; \
+    case "$(dpkg --print-architecture)" in \
+      amd64) arch=x64 ;; arm64) arch=arm64 ;; \
+      *) echo "unsupported arch for gitleaks" >&2; exit 1 ;; \
+    esac; \
+    ver="${GITLEAKS_VERSION:-$(curl -fsSL -o /dev/null -w '%{url_effective}' https://github.com/gitleaks/gitleaks/releases/latest | grep -oP 'releases/tag/v\K[^/]+')}"; \
+    test -n "$ver"; \
+    base="https://github.com/gitleaks/gitleaks/releases/download/v${ver}"; \
+    tgz="gitleaks_${ver}_linux_${arch}.tar.gz"; \
+    mkdir /tmp/gitleaks; cd /tmp/gitleaks; \
+    curl -fsSL "${base}/${tgz}" -o "$tgz"; \
+    curl -fsSL "${base}/gitleaks_${ver}_checksums.txt" -o checksums.txt; \
+    grep " ${tgz}\$" checksums.txt | sha256sum -c -; \
+    tar -xzf "$tgz" gitleaks; \
+    install -m 0755 gitleaks /usr/local/bin/gitleaks; \
+    cd /; rm -rf /tmp/gitleaks; \
+    gitleaks version
+
+# Go toolchain (for pre-commit's language: golang hooks and runtime go install).
 #   - Baking it into the image at build time makes pre-commit detect the system
-#     go and stop downloading Go itself from go.dev / dl.google.com (narrowing
-#     runtime egress to just the Go module proxy)
+#     go and stop downloading Go itself from go.dev / dl.google.com
+#   - Runtime module downloads only partly work: proxy.golang.org redirects some
+#     module zips to storage.googleapis.com, which is not allowed, so a golang hook
+#     with such dependencies does not build. gitleaks is therefore baked in as a
+#     binary above rather than built via its golang hook
 #   - The baked-in version is the latest stable, so it satisfies the version a
-#     hook's go.mod requires (gitleaks is on the go 1.24 line) and no extra
-#     toolchain download happens
+#     hook's go.mod requires and no extra toolchain download happens
 #   - Get the version from go.dev's JSON; pin with --build-arg GO_VERSION=1.26.5
 ARG GO_VERSION=""
 ARG WITH_GO=1
